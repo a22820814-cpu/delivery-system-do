@@ -72,7 +72,8 @@ async function transaction(work) {
 
 function calculateSettlement(fare) {
   const fee100 = 100;
-  const fee16 = Math.round(fare * 0.016);
+  // Keep fee16 key for backward compatibility with existing frontend payload shape.
+  const fee16 = Math.round(fare * 0.033);
   return {
     fee100,
     fee16,
@@ -517,17 +518,18 @@ app.post('/api/login', withErrorHandling(async (req, res) => {
 
   if (role === 'sub_admin') {
     const subAdmin = await get(
-      'SELECT username, password, company_name, branch_id FROM sub_admins WHERE username = ?',
+      'SELECT id, username, password, company_name, branch_id FROM sub_admins WHERE username = ?',
       [username]
     );
     if (!subAdmin || !verifyPassword(password, subAdmin.password)) {
       sendError(res, 401, '로그인 실패');
       return;
     }
-    const session = createSession('sub_admin', { id: subAdmin.branch_id, username: subAdmin.username, branch_id: subAdmin.branch_id });
+    const session = createSession('sub_admin', { id: subAdmin.id, username: subAdmin.username, branch_id: subAdmin.branch_id });
     res.json({
       success: true,
       role: 'sub_admin',
+      sub_admin_id: subAdmin.id,
       branch_id: subAdmin.branch_id,
       username: subAdmin.username,
       company_name: subAdmin.company_name,
@@ -823,6 +825,43 @@ app.post('/api/riders/:riderId/charge', withErrorHandling(async (req, res) => {
   res.json({ success: true, message: '충전 완료', rider: updatedRider });
 }));
 
+app.post('/api/riders/:riderId/deduct', withErrorHandling(async (req, res) => {
+  const session = requireAdminOrSubAdmin(req, res);
+  if (!session) {
+    return;
+  }
+  const riderId = Number(req.params.riderId);
+  const amount = Number(req.body.amount);
+
+  if (!riderId || !Number.isFinite(amount) || amount <= 0) {
+    sendError(res, 400, '차감 정보가 올바르지 않습니다.');
+    return;
+  }
+
+  const rider = await get('SELECT id, branch_id, balance FROM riders WHERE id = ?', [riderId]);
+  if (!rider) {
+    sendError(res, 404, '기사를 찾을 수 없습니다.');
+    return;
+  }
+
+  if (session.role === 'sub_admin' && rider.branch_id !== session.branch_id) {
+    sendError(res, 403, '해당 지점 기사만 차감할 수 있습니다.');
+    return;
+  }
+
+  if (rider.balance < amount) {
+    sendError(res, 400, '기사 잔액이 부족하여 차감할 수 없습니다.');
+    return;
+  }
+
+  await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [amount, riderId]);
+  const updatedRider = await get(
+    'SELECT id, username, name, balance, bank, account, branch_id FROM riders WHERE id = ?',
+    [riderId]
+  );
+  res.json({ success: true, message: '일차감 완료', rider: updatedRider });
+}));
+
 app.post('/api/deliveries', withErrorHandling(async (req, res) => {
   const session = requireAdmin(req, res);
   if (!session) {
@@ -1016,6 +1055,55 @@ app.post('/api/withdrawals/:withdrawalId/approve', withErrorHandling(async (req,
     withdrawal: { ...withdrawal, status: 'approved' },
     rider: updatedRider,
   });
+}));
+
+app.post('/api/me/password', withErrorHandling(async (req, res) => {
+  const session = requireSession(req, res);
+  if (!session) {
+    return;
+  }
+
+  const currentPassword = String(req.body.currentPassword || '').trim();
+  const newPassword = String(req.body.newPassword || '').trim();
+
+  if (!currentPassword || !newPassword) {
+    sendError(res, 400, '현재 비밀번호와 새 비밀번호를 모두 입력하세요.');
+    return;
+  }
+
+  if (newPassword.length < 4) {
+    sendError(res, 400, '새 비밀번호는 4자 이상이어야 합니다.');
+    return;
+  }
+
+  let user;
+  let tableName;
+  if (session.role === 'admin') {
+    user = await get('SELECT id, password FROM admins WHERE id = ?', [session.userId]);
+    tableName = 'admins';
+  } else if (session.role === 'sub_admin') {
+    user = await get('SELECT id, password FROM sub_admins WHERE id = ?', [session.userId]);
+    tableName = 'sub_admins';
+  } else if (session.role === 'rider') {
+    user = await get('SELECT id, password FROM riders WHERE id = ?', [session.userId]);
+    tableName = 'riders';
+  } else {
+    sendError(res, 400, '지원하지 않는 사용자 유형입니다.');
+    return;
+  }
+
+  if (!user) {
+    sendError(res, 404, '사용자 계정을 찾을 수 없습니다.');
+    return;
+  }
+
+  if (!verifyPassword(currentPassword, user.password)) {
+    sendError(res, 401, '현재 비밀번호가 일치하지 않습니다.');
+    return;
+  }
+
+  await run(`UPDATE ${tableName} SET password = ? WHERE id = ?`, [hashPassword(newPassword), session.userId]);
+  res.json({ success: true, message: '비밀번호 변경 완료' });
 }));
 
 initializeDatabase()

@@ -218,7 +218,7 @@
               <th>라이더</th>
               <th>요금</th>
               <th>수수료(100원)</th>
-              <th>수수료(1.6%)</th>
+              <th>수수료(3.3%)</th>
               <th>정산액</th>
             </tr>
           </thead>
@@ -289,6 +289,16 @@
       </div>
 
       <div class="card">
+        <h2>비밀번호 변경</h2>
+        <form id="rider-password-form">
+          <input id="rider-current-password" type="password" placeholder="현재 비밀번호" required />
+          <input id="rider-new-password" type="password" placeholder="새 비밀번호" required />
+          <button type="submit">비밀번호 변경</button>
+        </form>
+        <div id="rider-password-msg" class="message"></div>
+      </div>
+
+      <div class="card">
         <h2>나의 배달 기록</h2>
         <table id="rider-deliveries-table">
           <thead>
@@ -355,6 +365,28 @@
       </div>
 
       <div class="card">
+        <h2>기사 일차감</h2>
+        <form id="sub-admin-deduct-rider-form">
+          <select id="sub-admin-deduct-rider" required>
+            <option value="">라이더 선택</option>
+          </select>
+          <input id="sub-admin-deduct-amount" type="number" placeholder="차감액" required />
+          <button type="submit" style="background: #dc3545;">일차감 적용</button>
+        </form>
+        <div id="sub-admin-deduct-msg" class="message"></div>
+      </div>
+
+      <div class="card">
+        <h2>지사장 비밀번호 변경</h2>
+        <form id="sub-admin-password-form">
+          <input id="sub-admin-current-password" type="password" placeholder="현재 비밀번호" required />
+          <input id="sub-admin-new-password" type="password" placeholder="새 비밀번호" required />
+          <button type="submit">비밀번호 변경</button>
+        </form>
+        <div id="sub-admin-password-msg" class="message"></div>
+      </div>
+
+      <div class="card">
         <h2>전체 배달 기록</h2>
         <table id="sub-admin-deliveries-table">
           <thead>
@@ -363,7 +395,7 @@
               <th>라이더</th>
               <th>요금</th>
               <th>수수료(100원)</th>
-              <th>수수료(1.6%)</th>
+              <th>수수료(3.3%)</th>
               <th>정산액</th>
             </tr>
           </thead>
@@ -445,6 +477,7 @@
         const subAdminBranch = document.getElementById("sub-admin-branch");
         const createRiderBranch = document.getElementById("create-rider-branch");
         const subAdminChargeRider = document.getElementById("sub-admin-charge-rider");
+        const subAdminDeductRider = document.getElementById("sub-admin-deduct-rider");
         
         if (subAdminBranch) {
           subAdminBranch.innerHTML = '<option value="">지점 선택</option>' + branchOptions;
@@ -463,6 +496,9 @@
           const myBranchRiders = allRiders.filter(r => r.branch_id === currentUser.branch_id);
           const myRiderOptions = myBranchRiders.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
           subAdminChargeRider.innerHTML = '<option value="">라이더 선택</option>' + myRiderOptions;
+          if (subAdminDeductRider) {
+            subAdminDeductRider.innerHTML = '<option value="">라이더 선택</option>' + myRiderOptions;
+          }
         }
         
         if (currentUser?.role === "admin") {
@@ -807,6 +843,23 @@
       }
     });
 
+    document.getElementById("rider-password-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const currentPassword = document.getElementById("rider-current-password").value;
+      const newPassword = document.getElementById("rider-new-password").value;
+
+      try {
+        const data = await requestJson("/api/me/password", {
+          method: "POST",
+          body: JSON.stringify({ currentPassword, newPassword })
+        });
+        setMessage("rider-password-msg", data.message, true);
+        document.getElementById("rider-password-form").reset();
+      } catch (error) {
+        setMessage("rider-password-msg", error.message, false);
+      }
+    });
+
     document.getElementById("create-sub-admin-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const username = document.getElementById("sub-admin-username").value;
@@ -954,6 +1007,41 @@
       }
     });
 
+    document.getElementById("sub-admin-deduct-rider-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const riderId = Number(document.getElementById("sub-admin-deduct-rider").value);
+      const amount = Number(document.getElementById("sub-admin-deduct-amount").value);
+
+      try {
+        const data = await requestJson(`/api/riders/${riderId}/deduct`, {
+          method: "POST",
+          body: JSON.stringify({ amount })
+        });
+        setMessage("sub-admin-deduct-msg", data.message, true);
+        refreshData();
+        document.getElementById("sub-admin-deduct-rider-form").reset();
+      } catch (error) {
+        setMessage("sub-admin-deduct-msg", error.message, false);
+      }
+    });
+
+    document.getElementById("sub-admin-password-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const currentPassword = document.getElementById("sub-admin-current-password").value;
+      const newPassword = document.getElementById("sub-admin-new-password").value;
+
+      try {
+        const data = await requestJson("/api/me/password", {
+          method: "POST",
+          body: JSON.stringify({ currentPassword, newPassword })
+        });
+        setMessage("sub-admin-password-msg", data.message, true);
+        document.getElementById("sub-admin-password-form").reset();
+      } catch (error) {
+        setMessage("sub-admin-password-msg", error.message, false);
+      }
+    });
+
     function logout() {
       currentUser = null;
       allAdmins = [];
@@ -965,9 +1053,12 @@
       document.getElementById("rider-login-form").reset();
       document.getElementById("sub-admin-login-form").reset();
       document.getElementById("rider-withdraw-form").reset();
+      document.getElementById("rider-password-form").reset();
       document.getElementById("create-admin-form").reset();
       document.getElementById("admin-password-form").reset();
       document.getElementById("admin-reset-form").reset();
+      document.getElementById("sub-admin-password-form").reset();
+      document.getElementById("sub-admin-deduct-rider-form").reset();
       document.getElementById("admin-reset-panel").hidden = true;
       document.getElementById("admins-tbody").innerHTML = "";
       selectedAdminForReset = null;
