@@ -174,6 +174,7 @@ function buildStateForSession(session, state) {
       subAdmins: state.subAdmins.filter((subAdmin) => subAdmin.branch_id === session.branch_id),
       deliveries: state.deliveries.filter((delivery) => riderIds.has(delivery.riderId)),
       withdrawals: state.withdrawals.filter((withdrawal) => riderIds.has(withdrawal.riderId)),
+      deductionLogs: state.deductionLogs.filter((deduction) => riderIds.has(deduction.riderId)),
     };
   }
 
@@ -184,6 +185,7 @@ function buildStateForSession(session, state) {
     subAdmins: [],
     deliveries: state.deliveries.filter((delivery) => delivery.riderId === session.userId),
     withdrawals: state.withdrawals.filter((withdrawal) => withdrawal.riderId === session.userId),
+    deductionLogs: state.deductionLogs.filter((deduction) => deduction.riderId === session.userId),
   };
 }
 
@@ -262,6 +264,7 @@ function readSeedData() {
       { id: 1, riderId: 1, amount: 100000, status: 'approved' },
       { id: 2, riderId: 2, amount: 150000, status: 'pending' },
     ],
+    deductionLogs: [],
   };
 
   if (fs.existsSync(SEED_JSON_PATH)) {
@@ -361,6 +364,21 @@ async function initializeDatabase() {
     )
   `);
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS deduction_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rider_id INTEGER NOT NULL,
+      amount INTEGER NOT NULL,
+      days_count INTEGER,
+      weekday TEXT,
+      monthly_auto INTEGER NOT NULL DEFAULT 0,
+      description TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_by_role TEXT NOT NULL DEFAULT 'sub_admin',
+      FOREIGN KEY (rider_id) REFERENCES riders(id)
+    )
+  `);
+
   const seed = readSeedData();
   const branchCount = await get('SELECT COUNT(*) AS count FROM branches');
   if (branchCount.count === 0) {
@@ -426,6 +444,25 @@ async function initializeDatabase() {
           [withdrawal.id, withdrawal.riderId, withdrawal.amount, withdrawal.status]
         );
       }
+
+      for (const deduction of seed.deductionLogs || []) {
+        await run(
+          `INSERT INTO deduction_logs
+           (id, rider_id, amount, days_count, weekday, monthly_auto, description, created_at, created_by_role)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            deduction.id,
+            deduction.riderId,
+            deduction.amount,
+            deduction.daysCount || null,
+            deduction.weekday || '',
+            deduction.monthlyAuto ? 1 : 0,
+            deduction.description || '',
+            deduction.createdAt || new Date().toISOString(),
+            deduction.createdByRole || 'sub_admin',
+          ]
+        );
+      }
     });
   }
 
@@ -441,13 +478,19 @@ async function initializeDatabase() {
 }
 
 async function readState() {
-  const [admins, branches, riders, subAdmins, deliveries, withdrawals] = await Promise.all([
+  const [admins, branches, riders, subAdmins, deliveries, withdrawals, deductionLogs] = await Promise.all([
     all('SELECT id, username, name FROM admins ORDER BY id'),
     all('SELECT id, name FROM branches ORDER BY id'),
     all('SELECT id, username, name, balance, bank, account, branch_id FROM riders ORDER BY id'),
     all('SELECT id, username, company_name, branch_id FROM sub_admins ORDER BY id'),
     all('SELECT id, rider_id AS riderId, fare, fee100, fee16, final, status FROM deliveries ORDER BY id'),
     all('SELECT id, rider_id AS riderId, amount, status FROM withdrawals ORDER BY id'),
+    all(
+      `SELECT id, rider_id AS riderId, amount, days_count AS daysCount, weekday,
+              monthly_auto AS monthlyAuto, description, created_at AS createdAt, created_by_role AS createdByRole
+       FROM deduction_logs
+       ORDER BY id DESC`
+    ),
   ]);
 
   return {
@@ -457,6 +500,7 @@ async function readState() {
     subAdmins,
     deliveries,
     withdrawals,
+    deductionLogs,
   };
 }
 
@@ -832,9 +876,30 @@ app.post('/api/riders/:riderId/deduct', withErrorHandling(async (req, res) => {
   }
   const riderId = Number(req.params.riderId);
   const amount = Number(req.body.amount);
+  const daysCount = req.body.daysCount === '' || req.body.daysCount == null
+    ? null
+    : Number(req.body.daysCount);
+  const weekday = String(req.body.weekday || '').trim();
+  const monthlyAuto = Boolean(req.body.monthlyAuto);
+  const description = String(req.body.description || '').trim();
 
   if (!riderId || !Number.isFinite(amount) || amount <= 0) {
     sendError(res, 400, '차감 정보가 올바르지 않습니다.');
+    return;
+  }
+
+  if (daysCount != null && (!Number.isInteger(daysCount) || daysCount <= 0)) {
+    sendError(res, 400, '일수는 1 이상의 정수여야 합니다.');
+    return;
+  }
+
+  if (weekday && !['월', '화', '수', '목', '금', '토', '일'].includes(weekday)) {
+    sendError(res, 400, '요일 값이 올바르지 않습니다.');
+    return;
+  }
+
+  if (description.length > 200) {
+    sendError(res, 400, '차감내용은 200자 이하로 입력하세요.');
     return;
   }
 
@@ -854,12 +919,32 @@ app.post('/api/riders/:riderId/deduct', withErrorHandling(async (req, res) => {
     return;
   }
 
-  await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [amount, riderId]);
+  await transaction(async () => {
+    await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [amount, riderId]);
+    await run(
+      `INSERT INTO deduction_logs
+       (rider_id, amount, days_count, weekday, monthly_auto, description, created_by_role)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [riderId, amount, daysCount, weekday, monthlyAuto ? 1 : 0, description, session.role]
+    );
+  });
   const updatedRider = await get(
     'SELECT id, username, name, balance, bank, account, branch_id FROM riders WHERE id = ?',
     [riderId]
   );
-  res.json({ success: true, message: '일차감 완료', rider: updatedRider });
+  res.json({
+    success: true,
+    message: '일차감 완료',
+    rider: updatedRider,
+    deduction: {
+      riderId,
+      amount,
+      daysCount,
+      weekday,
+      monthlyAuto,
+      description,
+    },
+  });
 }));
 
 app.post('/api/deliveries', withErrorHandling(async (req, res) => {

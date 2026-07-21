@@ -371,9 +371,43 @@
             <option value="">라이더 선택</option>
           </select>
           <input id="sub-admin-deduct-amount" type="number" placeholder="차감액" required />
+          <input id="sub-admin-deduct-days" type="number" placeholder="일수 (선택)" />
+          <select id="sub-admin-deduct-weekday">
+            <option value="">요일 선택 (선택)</option>
+            <option value="월">월</option>
+            <option value="화">화</option>
+            <option value="수">수</option>
+            <option value="목">목</option>
+            <option value="금">금</option>
+            <option value="토">토</option>
+            <option value="일">일</option>
+          </select>
+          <label style="display:flex; gap:8px; align-items:center;">
+            <input id="sub-admin-deduct-monthly-auto" type="checkbox" />
+            월 자동차감
+          </label>
+          <input id="sub-admin-deduct-description" placeholder="차감내용" />
           <button type="submit" style="background: #dc3545;">일차감 적용</button>
         </form>
         <div id="sub-admin-deduct-msg" class="message"></div>
+      </div>
+
+      <div class="card">
+        <h2>차감 기록</h2>
+        <table id="sub-admin-deductions-table">
+          <thead>
+            <tr>
+              <th>번호</th>
+              <th>라이더</th>
+              <th>차감액</th>
+              <th>일수</th>
+              <th>요일</th>
+              <th>월자동차감</th>
+              <th>차감내용</th>
+            </tr>
+          </thead>
+          <tbody id="sub-admin-deductions-tbody"></tbody>
+        </table>
       </div>
 
       <div class="card">
@@ -410,6 +444,7 @@
     let allRiders = [];
     let allDeliveries = [];
     let allWithdrawals = [];
+    let allDeductionLogs = [];
     let allBranches = [];
     let allSubAdmins = [];
     let allAdmins = [];
@@ -462,6 +497,7 @@
         allRiders = data.riders;
         allDeliveries = data.deliveries;
         allWithdrawals = data.withdrawals;
+        allDeductionLogs = data.deductionLogs || [];
         allBranches = data.branches;
         allSubAdmins = data.subAdmins;
         
@@ -956,6 +992,7 @@
       const myRiders = allRiders.filter(r => r.branch_id === branchId);
       const myDeliveries = allDeliveries.filter(d => myRiders.some(r => r.id === d.riderId));
       const myWithdrawals = allWithdrawals.filter(w => myRiders.some(r => r.id === w.riderId));
+      const myDeductions = allDeductionLogs.filter(d => myRiders.some(r => r.id === d.riderId));
 
       // 출금 요청 테이블 (자신의 지점 라이더만)
       document.getElementById("sub-admin-withdrawals-tbody").innerHTML = myWithdrawals.map(w => {
@@ -987,6 +1024,21 @@
           </tr>
         `;
       }).join("");
+
+      document.getElementById("sub-admin-deductions-tbody").innerHTML = myDeductions.map(d => {
+        const rider = myRiders.find(r => r.id === d.riderId);
+        return `
+          <tr>
+            <td>${d.id}</td>
+            <td>${rider?.name || "불명"}</td>
+            <td>${d.amount}원</td>
+            <td>${d.daysCount || "-"}</td>
+            <td>${d.weekday || "-"}</td>
+            <td>${d.monthlyAuto ? "예" : "아니오"}</td>
+            <td>${d.description || "-"}</td>
+          </tr>
+        `;
+      }).join("");
     }
 
     document.getElementById("sub-admin-charge-rider-form").addEventListener("submit", async (e) => {
@@ -1011,11 +1063,16 @@
       e.preventDefault();
       const riderId = Number(document.getElementById("sub-admin-deduct-rider").value);
       const amount = Number(document.getElementById("sub-admin-deduct-amount").value);
+      const daysCountRaw = document.getElementById("sub-admin-deduct-days").value;
+      const weekday = document.getElementById("sub-admin-deduct-weekday").value;
+      const monthlyAuto = document.getElementById("sub-admin-deduct-monthly-auto").checked;
+      const description = document.getElementById("sub-admin-deduct-description").value;
+      const daysCount = daysCountRaw === "" ? null : Number(daysCountRaw);
 
       try {
         const data = await requestJson(`/api/riders/${riderId}/deduct`, {
           method: "POST",
-          body: JSON.stringify({ amount })
+          body: JSON.stringify({ amount, daysCount, weekday, monthlyAuto, description })
         });
         setMessage("sub-admin-deduct-msg", data.message, true);
         refreshData();
