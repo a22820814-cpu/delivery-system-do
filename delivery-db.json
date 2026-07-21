@@ -1,0 +1,54 @@
+{
+  "admins": [
+    {
+      "id": 1,
+      "username": "admin",
+      "password": "1234",
+      "name": "시스템 관리자"
+    }
+  ],
+  "branches": [
+    { "id": 1, "name": "강남점" },
+    { "id": 2, "name": "강북점" }
+  ],
+  "riders": [
+    {
+      "id": 1,
+      "username": "rider1",
+      "password": "1234",
+      "name": "김기사",
+      "balance": 150000,
+      "bank": "국민은행",
+      "account": "1234567890",
+      "branch_id": 1
+    },
+    {
+      "id": 2,
+      "username": "rider2",
+      "password": "1234",
+      "name": "이기사",
+      "balance": 280000,
+      "bank": "우리은행",
+      "account": "0987654321",
+      "branch_id": 1
+    }
+  ],
+  "subAdmins": [
+    {
+      "id": 1,
+      "username": "branch1",
+      "password": "1234",
+      "company_name": "강남점 운영사",
+      "branch_id": 1
+    }
+  ],
+  "deliveries": [
+    { "id": 1, "riderId": 1, "fare": 5000, "fee100": 100, "fee16": 80, "final": 4820, "status": "completed" },
+    { "id": 2, "riderId": 1, "fare": 7000, "fee100": 100, "fee16": 112, "final": 6788, "status": "completed" },
+    { "id": 3, "riderId": 2, "fare": 6000, "fee100": 100, "fee16": 96, "final": 5804, "status": "completed" }
+  ],
+  "withdrawals": [
+    { "id": 1, "riderId": 1, "amount": 100000, "status": "approved" },
+    { "id": 2, "riderId": 2, "amount": 150000, "status": "pending" }
+  ]
+}

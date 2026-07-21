@@ -1,0 +1,17 @@
+{
+  "name": "delivery-system",
+  "version": "1.0.0",
+  "description": "배달 정산 시스템",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "sqlite3": "^5.1.7"
+  }
+}

@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>배달 정산 시스템</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .card { background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    h1 { margin-top: 0; color: #333; }
+    h2 { color: #555; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+    .role-selector { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
+    .role-btn { padding: 15px 30px; font-size: 16px; border: 2px solid #007bff; background: white; color: #007bff; cursor: pointer; border-radius: 8px; transition: all 0.3s; }
+    .role-btn.active { background: #007bff; color: white; }
+    form { display: grid; gap: 10px; max-width: 400px; }
+    input, button, select { padding: 10px; font-size: 14px; border: 1px solid #ddd; border-radius: 5px; }
+    button { background: #007bff; color: white; cursor: pointer; border: none; font-weight: bold; }
+    button:hover { background: #0056b3; }
+    .message { color: #dc3545; margin-top: 10px; }
+    .success { color: #28a745; }
+    [hidden] { display: none !important; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+    th { background: #f0f0f0; font-weight: bold; }
+    tr:hover { background: #f9f9f9; }
+    .header { display: flex; justify-content: space-between; align-items: center; }
+    .logout-btn { padding: 8px 15px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    .logout-btn:hover { background: #c82333; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+    .stat-box { background: #f0f0f0; padding: 15px; border-radius: 8px; text-align: center; }
+    .stat-value { font-size: 24px; font-weight: bold; color: #007bff; }
+    .stat-label { font-size: 12px; color: #666; margin-top: 5px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- 역할 선택 화면 -->
+    <div id="role-selection" class="card">
+      <h1 style="text-align: center;">배달 정산 시스템</h1>
+      <div class="role-selector">
+        <button class="role-btn" onclick="selectRole('admin')">관리자 로그인</button>
+        <button class="role-btn" onclick="selectRole('sub_admin')">지사장 로그인</button>
+        <button class="role-btn" onclick="selectRole('rider')">기사 로그인</button>
+      </div>
+    </div>
+
+    <!-- 관리자 로그인 -->
+    <div id="admin-login" class="card" hidden>
+      <h2>관리자 로그인</h2>
+      <form id="admin-login-form">
+        <input id="admin-user" placeholder="사용자명 (admin)" required />
+        <input id="admin-pass" type="password" placeholder="비밀번호 (1234)" required />
+        <button type="submit">로그인</button>
+      </form>
+      <div id="admin-login-msg" class="message"></div>
+      <button onclick="selectRole(null)" style="margin-top: 10px; background: #6c757d;">뒤로</button>
+    </div>
+
+    <!-- 기사 로그인 -->
+    <div id="rider-login" class="card" hidden>
+      <h2>기사 로그인</h2>
+      <form id="rider-login-form">
+        <input id="rider-user" placeholder="사용자명 (rider1 또는 rider2)" required />
+        <input id="rider-pass" type="password" placeholder="비밀번호 (1234)" required />
+        <button type="submit">로그인</button>
+      </form>
+      <div id="rider-login-msg" class="message"></div>
+      <button onclick="selectRole(null)" style="margin-top: 10px; background: #6c757d;">뒤로</button>
+    </div>
+
+    <!-- 지사장 로그인 -->
+    <div id="sub-admin-login" class="card" hidden>
+      <h2>지사장 로그인</h2>
+      <form id="sub-admin-login-form">
+        <input id="sub-admin-user" placeholder="사용자명" required />
+        <input id="sub-admin-pass" type="password" placeholder="비밀번호" required />
+        <button type="submit">로그인</button>
+      </form>
+      <div id="sub-admin-login-msg" class="message"></div>
+      <button onclick="selectRole(null)" style="margin-top: 10px; background: #6c757d;">뒤로</button>
+    </div>
+
+    <!-- 관리자 대시보드 -->
+    <div id="admin-dashboard" hidden>
+      <div class="header">
+        <h1>관리자 대시보드</h1>
+        <button class="logout-btn" onclick="logout()">로그아웃</button>
+      </div>
+
+      <div class="card">
+        <h2>지점 관리</h2>
+        <form id="create-branch-form">
+          <input id="branch-name" placeholder="지점명 (예: 강남점, 강북점)" required />
+          <button type="submit">지점 추가</button>
+        </form>
+        <div id="create-branch-msg" class="message"></div>
+        <div id="branches-list" style="margin-top: 15px;"></div>
+      </div>
+
+      <div class="card">
+        <h2>관리자 계정 관리</h2>
+        <form id="create-admin-form">
+          <input id="admin-create-username" placeholder="새 관리자 아이디" required />
+          <input id="admin-create-name" placeholder="관리자 이름" required />
+          <input id="admin-create-password" type="password" placeholder="초기 비밀번호" required />
+          <button type="submit">관리자 추가</button>
+        </form>
+        <div id="create-admin-msg" class="message"></div>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>아이디</th>
+              <th>이름</th>
+              <th>작업</th>
+            </tr>
+          </thead>
+          <tbody id="admins-tbody"></tbody>
+        </table>
+        <div id="admin-actions-msg" class="message"></div>
+        <div id="admin-reset-panel" class="card" hidden style="margin-top: 15px; background: #f8f9fa;">
+          <h3 style="margin-top: 0; color: #333;">관리자 비밀번호 초기화</h3>
+          <p id="admin-reset-target" style="margin-bottom: 10px; color: #555;"></p>
+          <form id="admin-reset-form">
+            <input id="admin-reset-password" type="password" placeholder="새 비밀번호" required />
+            <div style="display: flex; gap: 10px;">
+              <button type="submit" style="background: #ff9800;">비밀번호 초기화</button>
+              <button type="button" id="admin-reset-cancel" style="background: #6c757d;">취소</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>내 관리자 비밀번호 변경</h2>
+        <form id="admin-password-form">
+          <input id="admin-current-password" type="password" placeholder="현재 비밀번호" required />
+          <input id="admin-new-password" type="password" placeholder="새 비밀번호" required />
+          <button type="submit">비밀번호 변경</button>
+        </form>
+        <div id="admin-password-msg" class="message"></div>
+      </div>
+
+      <div class="card">
+        <h2>지사장 추가</h2>
+        <form id="create-sub-admin-form">
+          <input id="sub-admin-username" placeholder="아이디" required />
+          <input id="sub-admin-password" type="password" placeholder="비밀번호" required />
+          <input id="sub-admin-company" placeholder="회사명" required />
+          <select id="sub-admin-branch" required>
+            <option value="">지점 선택</option>
+          </select>
+          <button type="submit">지사장 추가</button>
+        </form>
+        <div id="create-sub-admin-msg" class="message"></div>
+      </div>
+
+      <div class="card">
+        <h2>기사 추가</h2>
+        <form id="create-rider-form">
+          <input id="create-username" placeholder="사용자명" required />
+          <input id="create-password" type="password" placeholder="비밀번호" required />
+          <input id="create-name" placeholder="기사 이름" required />
+          <select id="create-rider-branch" required>
+            <option value="">지점 선택</option>
+          </select>
+          <button type="submit">기사 추가</button>
+        </form>
+        <div id="create-rider-msg" class="message"></div>
+      </div>
+
+      <div class="card">
+        <h2>잔액 충전</h2>
+        <form id="charge-rider-form">
+          <select id="charge-rider" required>
+            <option value="">라이더 선택</option>
+          </select>
+          <input id="charge-amount" type="number" placeholder="충전액" required />
+          <button type="submit">충전</button>
+        </form>
+        <div id="charge-msg" class="message"></div>
+      </div>
+
+      <div class="card">
+        <h2>배달 추가</h2>
+        <form id="delivery-form">
+          <select id="delivery-rider" required>
+            <option value="">라이더 선택</option>
+          </select>
+          <input id="delivery-fare" type="number" placeholder="요금" required />
+          <button type="submit">배달 추가</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>라이더 현황</h2>
+        <div class="stats" id="admin-stats"></div>
+        <table id="riders-table">
+          <thead>
+            <tr>
+              <th>라이더</th>
+              <th>현재 잔액</th>
+              <th>총 배달</th>
+              <th>출금 횟수</th>
+            </tr>
+          </thead>
+          <tbody id="riders-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>최근 배달</h2>
+        <table id="deliveries-table">
+          <thead>
+            <tr>
+              <th>번호</th>
+              <th>라이더</th>
+              <th>요금</th>
+              <th>수수료(100원)</th>
+              <th>수수료(1.6%)</th>
+              <th>정산액</th>
+            </tr>
+          </thead>
+          <tbody id="deliveries-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>출금 요청</h2>
+        <table id="withdrawals-table">
+          <thead>
+            <tr>
+              <th>번호</th>
+              <th>라이더</th>
+              <th>출금액</th>
+              <th>상태</th>
+              <th>작업</th>
+            </tr>
+          </thead>
+          <tbody id="withdrawals-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 기사 대시보드 -->
+    <div id="rider-dashboard" hidden>
+      <div class="header">
+        <h1>기사 대시보드 - <span id="rider-name"></span></h1>
+        <button class="logout-btn" onclick="logout()">로그아웃</button>
+      </div>
+
+      <div class="card">
+        <h2>나의 정산 현황</h2>
+        <div class="stats">
+          <div class="stat-box">
+            <div class="stat-value" id="rider-balance">0원</div>
+            <div class="stat-label">현재 잔액</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value" id="rider-delivery-count">0</div>
+            <div class="stat-label">총 배달</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value" id="rider-withdrawal-count">0</div>
+            <div class="stat-label">출금 횟수</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>개인정보 등록</h2>
+        <form id="rider-info-form">
+          <input id="rider-info-name" placeholder="이름" />
+          <input id="rider-info-bank" placeholder="은행 (예: 국민은행)" />
+          <input id="rider-info-account" placeholder="계좌번호" />
+          <button type="submit">저장</button>
+        </form>
+        <div id="rider-info-msg" class="message"></div>
+      </div>
+
+      <div class="card">
+        <h2>출금 요청</h2>
+        <form id="rider-withdraw-form">
+          <input id="rider-withdraw-amount" type="number" placeholder="출금액" required />
+          <button type="submit">출금 요청</button>
+        </form>
+        <div id="rider-withdraw-msg" class="message"></div>
+      </div>
+
+      <div class="card">
+        <h2>나의 배달 기록</h2>
+        <table id="rider-deliveries-table">
+          <thead>
+            <tr>
+              <th>번호</th>
+              <th>요금</th>
+              <th>수수료</th>
+              <th>정산액</th>
+              <th>상태</th>
+            </tr>
+          </thead>
+          <tbody id="rider-deliveries-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>나의 출금 기록</h2>
+        <table id="rider-withdrawals-table">
+          <thead>
+            <tr>
+              <th>번호</th>
+              <th>출금액</th>
+              <th>상태</th>
+            </tr>
+          </thead>
+          <tbody id="rider-withdrawals-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 지사장 대시보드 -->
+    <div id="sub-admin-dashboard" hidden>
+      <div class="header">
+        <h1>지사장 대시보드 - <span id="sub-admin-company"></span></h1>
+        <button class="logout-btn" onclick="logout()">로그아웃</button>
+      </div>
+
+      <div class="card">
+        <h2>기사 잔액 충전</h2>
+        <form id="sub-admin-charge-rider-form">
+          <select id="sub-admin-charge-rider" required>
+            <option value="">라이더 선택</option>
+          </select>
+          <input id="sub-admin-charge-amount" type="number" placeholder="충전액" required />
+          <button type="submit">충전</button>
+        </form>
+        <div id="sub-admin-charge-msg" class="message"></div>
+      </div>
+
+      <div class="card">
+        <h2>출금 요청 현황</h2>
+        <table id="sub-admin-withdrawals-table">
+          <thead>
+            <tr>
+              <th>번호</th>
+              <th>라이더</th>
+              <th>출금액</th>
+              <th>상태</th>
+              <th>작업</th>
+            </tr>
+          </thead>
+          <tbody id="sub-admin-withdrawals-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>전체 배달 기록</h2>
+        <table id="sub-admin-deliveries-table">
+          <thead>
+            <tr>
+              <th>번호</th>
+              <th>라이더</th>
+              <th>요금</th>
+              <th>수수료(100원)</th>
+              <th>수수료(1.6%)</th>
+              <th>정산액</th>
+            </tr>
+          </thead>
+          <tbody id="sub-admin-deliveries-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentUser = null;
+    let allRiders = [];
+    let allDeliveries = [];
+    let allWithdrawals = [];
+    let allBranches = [];
+    let allSubAdmins = [];
+    let allAdmins = [];
+    let selectedAdminForReset = null;
+
+    function setMessage(elementId, text, isSuccess) {
+      const element = document.getElementById(elementId);
+      element.textContent = text;
+      element.classList.toggle("success", Boolean(isSuccess));
+    }
+
+    async function requestJson(url, options = {}) {
+      const headers = {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      };
+      if (currentUser?.token) {
+        headers.Authorization = `Bearer ${currentUser.token}`;
+      }
+      const response = await fetch(url, {
+        headers,
+        ...options,
+      });
+      const data = await response.json();
+      if (!response.ok || data.success === false) {
+        throw new Error(data.message || "요청 처리에 실패했습니다.");
+      }
+      return data;
+    }
+
+    function selectRole(role) {
+      document.getElementById("role-selection").hidden = role !== null;
+      document.getElementById("admin-login").hidden = role !== "admin";
+      document.getElementById("rider-login").hidden = role !== "rider";
+      document.getElementById("sub-admin-login").hidden = role !== "sub_admin";
+      if (role === null) {
+        currentUser = null;
+      }
+    }
+
+    async function refreshData() {
+      if (!currentUser?.token) {
+        return;
+      }
+
+      try {
+        const response = await requestJson("/api/state");
+        const data = response.data;
+        allAdmins = data.admins || [];
+        allRiders = data.riders;
+        allDeliveries = data.deliveries;
+        allWithdrawals = data.withdrawals;
+        allBranches = data.branches;
+        allSubAdmins = data.subAdmins;
+        
+        // 라이더 선택 드롭다운 업데이트 (관리자용)
+        const deliveryRider = document.getElementById("delivery-rider");
+        const chargeRider = document.getElementById("charge-rider");
+        const options = allRiders.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
+        deliveryRider.innerHTML = '<option value="">라이더 선택</option>' + options;
+        chargeRider.innerHTML = '<option value="">라이더 선택</option>' + options;
+        
+        // 지점 선택 드롭다운 업데이트
+        const branchOptions = allBranches.map(b => `<option value="${b.id}">${b.name}</option>`).join("");
+        const subAdminBranch = document.getElementById("sub-admin-branch");
+        const createRiderBranch = document.getElementById("create-rider-branch");
+        const subAdminChargeRider = document.getElementById("sub-admin-charge-rider");
+        
+        if (subAdminBranch) {
+          subAdminBranch.innerHTML = '<option value="">지점 선택</option>' + branchOptions;
+        }
+        if (createRiderBranch) {
+          createRiderBranch.innerHTML = '<option value="">지점 선택</option>' + branchOptions;
+        }
+
+        const branchesList = document.getElementById("branches-list");
+        if (branchesList) {
+          branchesList.innerHTML = allBranches.map(branch => `<div>${branch.id}. ${branch.name}</div>`).join("") || "등록된 지점이 없습니다.";
+        }
+        
+        // 지사장용 라이더 드롭다운 (자신의 지점만)
+        if (subAdminChargeRider && currentUser?.branch_id) {
+          const myBranchRiders = allRiders.filter(r => r.branch_id === currentUser.branch_id);
+          const myRiderOptions = myBranchRiders.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
+          subAdminChargeRider.innerHTML = '<option value="">라이더 선택</option>' + myRiderOptions;
+        }
+        
+        if (currentUser?.role === "admin") {
+          await refreshAdminAccounts();
+          updateAdminDashboard();
+        } else if (currentUser?.role === "rider") {
+          updateRiderDashboard();
+        } else if (currentUser?.role === "sub_admin") {
+          updateSubAdminDashboard();
+        }
+      } catch (error) {
+        console.error("Failed to refresh data:", error);
+      }
+    }
+
+    async function refreshAdminAccounts() {
+      if (currentUser?.role !== "admin") {
+        return;
+      }
+
+      const response = await requestJson("/api/admins");
+      allAdmins = response.data;
+      document.getElementById("admins-tbody").innerHTML = allAdmins.map(admin => `
+        <tr>
+          <td>${admin.id}</td>
+          <td>${admin.username}</td>
+          <td>${admin.name}</td>
+          <td>
+            ${admin.id === currentUser?.admin_id
+              ? '<span style="color: #666;">현재 계정</span>'
+              : `<button type="button" onclick="resetAdminPassword(${admin.id}, '${admin.username}')" style="margin-right: 8px; background: #ff9800;">비밀번호 초기화</button><button type="button" onclick="deleteAdmin(${admin.id}, '${admin.username}')" style="background: #dc3545;">삭제</button>`}
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    function resetAdminPassword(adminId, username) {
+      selectedAdminForReset = { adminId, username };
+      document.getElementById("admin-reset-target").textContent = `${username} 관리자 비밀번호를 초기화합니다.`;
+      document.getElementById("admin-reset-password").value = "";
+      document.getElementById("admin-reset-panel").hidden = false;
+    }
+
+    function closeAdminResetPanel() {
+      selectedAdminForReset = null;
+      document.getElementById("admin-reset-form").reset();
+      document.getElementById("admin-reset-panel").hidden = true;
+    }
+
+    document.getElementById("admin-reset-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!selectedAdminForReset) {
+        setMessage("admin-actions-msg", "초기화할 관리자를 먼저 선택하세요.", false);
+        return;
+      }
+
+      const newPassword = document.getElementById("admin-reset-password").value;
+
+      try {
+        const data = await requestJson(`/api/admins/${selectedAdminForReset.adminId}/reset-password`, {
+          method: "POST",
+          body: JSON.stringify({ newPassword })
+        });
+        setMessage("admin-actions-msg", `${selectedAdminForReset.username}: ${data.message}`, true);
+        closeAdminResetPanel();
+      } catch (error) {
+        setMessage("admin-actions-msg", error.message, false);
+      }
+    });
+
+    document.getElementById("admin-reset-cancel").addEventListener("click", closeAdminResetPanel);
+
+    async function deleteAdmin(adminId, username) {
+      if (!confirm(`${username} 관리자 계정을 삭제하시겠습니까?`)) {
+        return;
+      }
+
+      try {
+        const data = await requestJson(`/api/admins/${adminId}`, {
+          method: "DELETE"
+        });
+        setMessage("admin-actions-msg", `${username}: ${data.message}`, true);
+        await refreshAdminAccounts();
+      } catch (error) {
+        setMessage("admin-actions-msg", error.message, false);
+      }
+    }
+
+    function updateAdminDashboard() {
+      const statsHtml = allRiders.map(r => `
+        <div class="stat-box">
+          <div class="stat-value">${r.balance}원</div>
+          <div class="stat-label">${r.name}</div>
+        </div>
+      `).join("");
+      document.getElementById("admin-stats").innerHTML = statsHtml;
+
+      document.getElementById("riders-tbody").innerHTML = allRiders.map(r => `
+        <tr>
+          <td>${r.name}</td>
+          <td>${r.balance}원</td>
+          <td>${allDeliveries.filter(d => d.riderId === r.id).length}</td>
+          <td>${allWithdrawals.filter(w => w.riderId === r.id).length}</td>
+        </tr>
+      `).join("");
+
+      document.getElementById("deliveries-tbody").innerHTML = allDeliveries.map(d => {
+        const rider = allRiders.find(r => r.id === d.riderId);
+        const statusColor = d.status === "pending" ? "#ff9800" : "#28a745";
+        const statusText = d.status === "pending" ? "배달중" : "정산완료";
+        return `
+          <tr>
+            <td>${d.id}</td>
+            <td>${rider?.name || "불명"}</td>
+            <td>${d.fare}원</td>
+            <td>${d.fee100}원</td>
+            <td>${d.fee16}원</td>
+            <td>${d.final}원 <span style="color: ${statusColor}; font-weight: bold; font-size: 0.9em;">(${statusText})</span></td>
+          </tr>
+        `;
+      }).join("");
+
+      document.getElementById("withdrawals-tbody").innerHTML = allWithdrawals.map(w => {
+        const rider = allRiders.find(r => r.id === w.riderId);
+        const statusColor = w.status === "pending" ? "#ff9800" : (w.status === "approved" ? "#28a745" : "#dc3545");
+        const statusText = w.status === "pending" ? "대기 중" : (w.status === "approved" ? "승인" : "거부");
+        return `
+          <tr>
+            <td>${w.id}</td>
+            <td>${rider?.name || "불명"}</td>
+            <td>${w.amount}원</td>
+            <td style="color: ${statusColor}; font-weight: bold;">${statusText}</td>
+            <td>${w.status === "pending" ? `<button onclick="approveWithdrawal(${w.id})" style="background: #28a745; padding: 5px 10px; color: white; border: none; border-radius: 3px; cursor: pointer;">승인</button>` : "-"}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function updateRiderDashboard() {
+      const riderId = currentUser.rider_id;
+      const rider = allRiders.find(r => r.id === riderId);
+      const myDeliveries = allDeliveries.filter(d => d.riderId === riderId);
+      const myWithdrawals = allWithdrawals.filter(w => w.riderId === riderId);
+
+      document.getElementById("rider-name").textContent = rider?.name || "기사";
+      document.getElementById("rider-balance").textContent = (rider?.balance || 0) + "원";
+      document.getElementById("rider-delivery-count").textContent = myDeliveries.length;
+      document.getElementById("rider-withdrawal-count").textContent = myWithdrawals.length;
+
+      // 개인정보 입력 필드 채우기
+      if (rider) {
+        document.getElementById("rider-info-name").value = rider.name || "";
+        document.getElementById("rider-info-bank").value = rider.bank || "";
+        document.getElementById("rider-info-account").value = rider.account || "";
+      }
+
+      document.getElementById("rider-deliveries-tbody").innerHTML = myDeliveries.map(d => `
+        <tr>
+          <td>${d.id}</td>
+          <td>${d.fare}원</td>
+          <td>${d.fee100 + d.fee16}원</td>
+          <td>${d.final}원</td>
+          <td>${d.status === 'completed' ? '✅ 정산완료' : `<button onclick="completeDelivery(${d.id})" style="background: #28a745; color: white; padding: 5px 10px; border: none; border-radius: 3px; cursor: pointer;">배달완료</button>`}</td>
+        </tr>
+      `).join("");
+
+      document.getElementById("rider-withdrawals-tbody").innerHTML = myWithdrawals.map(w => `
+        <tr>
+          <td>${w.id}</td>
+          <td>${w.amount}원</td>
+          <td>${w.status}</td>
+        </tr>
+      `).join("");
+    }
+
+    document.getElementById("admin-login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const username = document.getElementById("admin-user").value;
+      const password = document.getElementById("admin-pass").value;
+
+      try {
+        const data = await requestJson("/api/login", {
+          method: "POST",
+          body: JSON.stringify({ role: "admin", username, password })
+        });
+        currentUser = data;
+        document.getElementById("role-selection").hidden = true;
+        document.getElementById("admin-login").hidden = true;
+        document.getElementById("admin-dashboard").hidden = false;
+        refreshData();
+      } catch (error) {
+        document.getElementById("admin-login-msg").textContent = "로그인 실패";
+      }
+    });
+
+    document.getElementById("rider-login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const username = document.getElementById("rider-user").value;
+      const password = document.getElementById("rider-pass").value;
+
+      try {
+        const data = await requestJson("/api/login", {
+          method: "POST",
+          body: JSON.stringify({ role: "rider", username, password })
+        });
+        currentUser = data;
+        document.getElementById("role-selection").hidden = true;
+        document.getElementById("rider-login").hidden = true;
+        document.getElementById("rider-dashboard").hidden = false;
+        refreshData();
+      } catch (error) {
+        document.getElementById("rider-login-msg").textContent = "로그인 실패";
+      }
+    });
+
+    document.getElementById("create-rider-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const username = document.getElementById("create-username").value;
+      const password = document.getElementById("create-password").value;
+      const name = document.getElementById("create-name").value;
+      const branch_id = Number(document.getElementById("create-rider-branch").value);
+
+      try {
+        const data = await requestJson("/api/riders", {
+          method: "POST",
+          body: JSON.stringify({ username, password, name, branch_id })
+        });
+        setMessage("create-rider-msg", data.message, true);
+        refreshData();
+        document.getElementById("create-rider-form").reset();
+      } catch (error) {
+        setMessage("create-rider-msg", error.message, false);
+      }
+    });
+
+    document.getElementById("create-admin-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const username = document.getElementById("admin-create-username").value;
+      const name = document.getElementById("admin-create-name").value;
+      const password = document.getElementById("admin-create-password").value;
+
+      try {
+        const data = await requestJson("/api/admins", {
+          method: "POST",
+          body: JSON.stringify({ username, name, password })
+        });
+        setMessage("create-admin-msg", data.message, true);
+        await refreshAdminAccounts();
+        document.getElementById("create-admin-form").reset();
+      } catch (error) {
+        setMessage("create-admin-msg", error.message, false);
+      }
+    });
+
+    document.getElementById("admin-password-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const currentPassword = document.getElementById("admin-current-password").value;
+      const newPassword = document.getElementById("admin-new-password").value;
+
+      try {
+        const data = await requestJson(`/api/admins/${currentUser.admin_id}/password`, {
+          method: "POST",
+          body: JSON.stringify({ currentPassword, newPassword })
+        });
+        setMessage("admin-password-msg", data.message, true);
+        document.getElementById("admin-password-form").reset();
+      } catch (error) {
+        setMessage("admin-password-msg", error.message, false);
+      }
+    });
+
+    document.getElementById("charge-rider-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const riderId = Number(document.getElementById("charge-rider").value);
+      const amount = Number(document.getElementById("charge-amount").value);
+
+      try {
+        const data = await requestJson(`/api/riders/${riderId}/charge`, {
+          method: "POST",
+          body: JSON.stringify({ amount })
+        });
+        setMessage("charge-msg", data.message, true);
+        refreshData();
+        document.getElementById("charge-rider-form").reset();
+      } catch (error) {
+        setMessage("charge-msg", error.message, false);
+      }
+    });
+
+    document.getElementById("delivery-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const riderId = Number(document.getElementById("delivery-rider").value);
+      const fare = Number(document.getElementById("delivery-fare").value);
+
+      try {
+        const data = await requestJson("/api/deliveries", {
+          method: "POST",
+          body: JSON.stringify({ riderId, fare })
+        });
+        const delivery = data.delivery;
+        const rider = allRiders.find(r => r.id === riderId);
+        alert(`✅ 배달 추가 완료!\n배달료: ${delivery.fare}원\n수수료: ${delivery.fee100 + delivery.fee16}원\n기사 정산액: ${delivery.final}원\n\n${rider?.name || "선택한 기사"} 기사의 잔액이 즉시 ${delivery.final}원 증가했습니다!`);
+        refreshData();
+        document.getElementById("delivery-form").reset();
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+
+    document.getElementById("rider-info-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = document.getElementById("rider-info-name").value;
+      const bank = document.getElementById("rider-info-bank").value;
+      const account = document.getElementById("rider-info-account").value;
+
+      try {
+        const data = await requestJson(`/api/riders/${currentUser.rider_id}/info`, {
+          method: "POST",
+          body: JSON.stringify({ name, bank, account })
+        });
+        setMessage("rider-info-msg", data.message, true);
+        refreshData();
+      } catch (error) {
+        setMessage("rider-info-msg", error.message, false);
+      }
+    });
+
+    document.getElementById("rider-withdraw-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const amount = Number(document.getElementById("rider-withdraw-amount").value);
+
+      try {
+        const data = await requestJson("/api/withdrawals", {
+          method: "POST",
+          body: JSON.stringify({ riderId: currentUser.rider_id, amount })
+        });
+        setMessage("rider-withdraw-msg", data.message, true);
+        refreshData();
+        document.getElementById("rider-withdraw-form").reset();
+      } catch (error) {
+        setMessage("rider-withdraw-msg", error.message, false);
+      }
+    });
+
+    document.getElementById("create-sub-admin-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const username = document.getElementById("sub-admin-username").value;
+      const password = document.getElementById("sub-admin-password").value;
+      const company_name = document.getElementById("sub-admin-company").value;
+      const branch_id = Number(document.getElementById("sub-admin-branch").value);
+
+      try {
+        const data = await requestJson("/api/sub-admins", {
+          method: "POST",
+          body: JSON.stringify({ username, password, company_name, branch_id })
+        });
+        setMessage("create-sub-admin-msg", data.message, true);
+        refreshData();
+        document.getElementById("create-sub-admin-form").reset();
+      } catch (error) {
+        setMessage("create-sub-admin-msg", error.message, false);
+      }
+    });
+
+    document.getElementById("create-branch-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = document.getElementById("branch-name").value;
+
+      try {
+        const data = await requestJson("/api/branches", {
+          method: "POST",
+          body: JSON.stringify({ name })
+        });
+        setMessage("create-branch-msg", data.message, true);
+        refreshData();
+        document.getElementById("create-branch-form").reset();
+      } catch (error) {
+        setMessage("create-branch-msg", error.message, false);
+      }
+    });
+
+    function completeDelivery(deliveryId) {
+      const delivery = allDeliveries.find(d => d.id === deliveryId);
+      if (!delivery) return;
+      
+      if (confirm(`배달 #${deliveryId}를 완료하시겠습니까?\n정산액: ${delivery.final}원`)) {
+        requestJson(`/api/deliveries/${deliveryId}/complete`, {
+          method: "POST"
+        }).then(() => {
+          refreshData();
+          alert(`✅ 배달 완료!\n배달료: ${delivery.fare}원\n수수료: ${delivery.fee100 + delivery.fee16}원\n정산액: ${delivery.final}원\n\n정산이 완료되었습니다!`);
+        }).catch((error) => {
+          alert(error.message);
+        });
+      }
+    }
+
+    async function approveWithdrawal(withdrawalId) {
+      if (!confirm("출금을 승인하시겠습니까?")) return;
+      try {
+        const data = await requestJson(`/api/withdrawals/${withdrawalId}/approve`, {
+          method: "POST"
+        });
+        alert(data.message);
+        refreshData();
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
+    document.getElementById("sub-admin-login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const username = document.getElementById("sub-admin-user").value;
+      const password = document.getElementById("sub-admin-pass").value;
+
+      try {
+        const data = await requestJson("/api/login", {
+          method: "POST",
+          body: JSON.stringify({ role: "sub_admin", username, password })
+        });
+        currentUser = data;
+        document.getElementById("role-selection").hidden = true;
+        document.getElementById("sub-admin-login").hidden = true;
+        document.getElementById("sub-admin-dashboard").hidden = false;
+        refreshData();
+      } catch (error) {
+        document.getElementById("sub-admin-login-msg").textContent = "로그인 실패";
+      }
+    });
+
+    function updateSubAdminDashboard() {
+      // 지사장 회사명 표시
+      const branchId = currentUser.branch_id;
+      const myBranch = allBranches.find(b => b.id === branchId);
+      document.getElementById("sub-admin-company").textContent = myBranch?.name || "미등록";
+      
+      // 자신의 지점에 속한 라이더만 필터링
+      const myRiders = allRiders.filter(r => r.branch_id === branchId);
+      const myDeliveries = allDeliveries.filter(d => myRiders.some(r => r.id === d.riderId));
+      const myWithdrawals = allWithdrawals.filter(w => myRiders.some(r => r.id === w.riderId));
+
+      // 출금 요청 테이블 (자신의 지점 라이더만)
+      document.getElementById("sub-admin-withdrawals-tbody").innerHTML = myWithdrawals.map(w => {
+        const rider = myRiders.find(r => r.id === w.riderId);
+        const statusColor = w.status === "pending" ? "#ff9800" : (w.status === "approved" ? "#28a745" : "#dc3545");
+        const statusText = w.status === "pending" ? "대기 중" : (w.status === "approved" ? "승인" : "거부");
+        return `
+          <tr>
+            <td>${w.id}</td>
+            <td>${rider?.name || "불명"}</td>
+            <td>${w.amount}원</td>
+            <td style="color: ${statusColor}; font-weight: bold;">${statusText}</td>
+            <td>${w.status === "pending" ? `<button onclick="approveWithdrawal(${w.id})" style="background: #28a745; padding: 5px 10px; color: white; border: none; border-radius: 3px; cursor: pointer;">승인</button>` : "-"}</td>
+          </tr>
+        `;
+      }).join("");
+
+      // 배달 기록 테이블 (자신의 지점 라이더만)
+      document.getElementById("sub-admin-deliveries-tbody").innerHTML = myDeliveries.map(d => {
+        const rider = myRiders.find(r => r.id === d.riderId);
+        return `
+          <tr>
+            <td>${d.id}</td>
+            <td>${rider?.name || "불명"}</td>
+            <td>${d.fare}원</td>
+            <td>${d.fee100}원</td>
+            <td>${d.fee16}원</td>
+            <td>${d.final}원</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    document.getElementById("sub-admin-charge-rider-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const riderId = Number(document.getElementById("sub-admin-charge-rider").value);
+      const amount = Number(document.getElementById("sub-admin-charge-amount").value);
+
+      try {
+        const data = await requestJson(`/api/riders/${riderId}/charge`, {
+          method: "POST",
+          body: JSON.stringify({ amount })
+        });
+        setMessage("sub-admin-charge-msg", data.message, true);
+        refreshData();
+        document.getElementById("sub-admin-charge-rider-form").reset();
+      } catch (error) {
+        setMessage("sub-admin-charge-msg", error.message, false);
+      }
+    });
+
+    function logout() {
+      currentUser = null;
+      allAdmins = [];
+      document.getElementById("role-selection").hidden = false;
+      document.getElementById("admin-dashboard").hidden = true;
+      document.getElementById("rider-dashboard").hidden = true;
+      document.getElementById("sub-admin-dashboard").hidden = true;
+      document.getElementById("admin-login-form").reset();
+      document.getElementById("rider-login-form").reset();
+      document.getElementById("sub-admin-login-form").reset();
+      document.getElementById("rider-withdraw-form").reset();
+      document.getElementById("create-admin-form").reset();
+      document.getElementById("admin-password-form").reset();
+      document.getElementById("admin-reset-form").reset();
+      document.getElementById("admin-reset-panel").hidden = true;
+      document.getElementById("admins-tbody").innerHTML = "";
+      selectedAdminForReset = null;
+      selectRole(null);
+    }
+
+    refreshData();
+  </script>
+</body>
+</html>
