@@ -10,7 +10,7 @@ services:
         value: 20
       - key: SQLITE_PATH
         value: /var/data/delivery-db.sqlite
-    disks:
-      - name: delivery-data
-        mountPath: /var/data
-        sizeGB: 1
+    disk:
+      name: delivery-data
+      mountPath: /var/data
+      sizeGB: 1
