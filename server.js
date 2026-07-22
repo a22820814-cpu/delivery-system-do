@@ -162,7 +162,9 @@ function requireAdmin(req, res) {
 }
 
 function isSuperAdmin(session) {
-  return session.role === 'admin' && !session.branch_id;
+  return session.role === 'admin'
+    && !session.branch_id
+    && (session.userId === 1 || session.username === DEFAULT_ADMIN_USERNAME);
 }
 
 function requireSuperAdmin(req, res) {
@@ -179,25 +181,25 @@ function requireSuperAdmin(req, res) {
 
 function buildStateForSession(session, state) {
   if (session.role === 'admin') {
-    if (session.branch_id) {
-      const riders = state.riders.filter((rider) => rider.branch_id === session.branch_id);
-      const riderIds = new Set(riders.map((rider) => rider.id));
+    if (isSuperAdmin(session)) {
       return {
-        branches: state.branches.filter((branch) => branch.id === session.branch_id),
-        riders,
-        deliveries: state.deliveries.filter((delivery) => riderIds.has(delivery.riderId)),
-        withdrawals: state.withdrawals.filter((withdrawal) => riderIds.has(withdrawal.riderId)),
-        deductionLogs: state.deductionLogs.filter((deduction) => riderIds.has(deduction.riderId)),
-        admins: state.admins.filter((admin) => admin.id === session.userId),
+        ...state,
+        admins: state.admins,
         subAdmins: [],
-        notice: state.notice,
       };
     }
 
+    const riders = state.riders.filter((rider) => rider.branch_id === session.branch_id);
+    const riderIds = new Set(riders.map((rider) => rider.id));
     return {
-      ...state,
-      admins: state.admins,
+      branches: state.branches.filter((branch) => branch.id === session.branch_id),
+      riders,
+      deliveries: state.deliveries.filter((delivery) => riderIds.has(delivery.riderId)),
+      withdrawals: state.withdrawals.filter((withdrawal) => riderIds.has(withdrawal.riderId)),
+      deductionLogs: state.deductionLogs.filter((deduction) => riderIds.has(deduction.riderId)),
+      admins: state.admins.filter((admin) => admin.id === session.userId),
       subAdmins: [],
+      notice: state.notice,
     };
   }
 
@@ -804,7 +806,7 @@ app.post('/api/riders', withErrorHandling(async (req, res) => {
     return;
   }
 
-  if (session.branch_id && session.branch_id !== branchId) {
+  if (!isSuperAdmin(session) && session.branch_id !== branchId) {
     sendError(res, 403, '본인 지점의 기사만 생성할 수 있습니다.');
     return;
   }
@@ -854,7 +856,7 @@ app.post('/api/riders/:riderId/charge', withErrorHandling(async (req, res) => {
     return;
   }
 
-  if (session.branch_id && rider.branch_id !== session.branch_id) {
+  if (!isSuperAdmin(session) && rider.branch_id !== session.branch_id) {
     sendError(res, 403, '해당 지점 기사만 충전할 수 있습니다.');
     return;
   }
@@ -928,7 +930,7 @@ app.post('/api/riders/:riderId/deduct', withErrorHandling(async (req, res) => {
     return;
   }
 
-  if (session.branch_id && rider.branch_id !== session.branch_id) {
+  if (!isSuperAdmin(session) && rider.branch_id !== session.branch_id) {
     sendError(res, 403, '해당 지점 기사만 차감할 수 있습니다.');
     return;
   }
@@ -997,7 +999,7 @@ app.post('/api/deliveries', withErrorHandling(async (req, res) => {
     return;
   }
 
-  if (session.branch_id && rider.branch_id !== session.branch_id) {
+  if (!isSuperAdmin(session) && rider.branch_id !== session.branch_id) {
     sendError(res, 403, '해당 지점 기사 배달만 추가할 수 있습니다.');
     return;
   }
@@ -1047,7 +1049,7 @@ app.post('/api/deliveries/:deliveryId/complete', withErrorHandling(async (req, r
     return;
   }
 
-  if (session.role === 'admin' && session.branch_id) {
+  if (session.role === 'admin' && !isSuperAdmin(session)) {
     const scopedRider = await get('SELECT id, branch_id FROM riders WHERE id = ?', [delivery.riderId]);
     if (!scopedRider) {
       sendError(res, 404, '기사를 찾을 수 없습니다.');
@@ -1084,7 +1086,7 @@ app.post('/api/riders/:riderId/info', withErrorHandling(async (req, res) => {
     return;
   }
 
-  if (session.role === 'admin' && session.branch_id && rider.branch_id !== session.branch_id) {
+  if (session.role === 'admin' && !isSuperAdmin(session) && rider.branch_id !== session.branch_id) {
     sendError(res, 403, '해당 지점 기사 정보만 수정할 수 있습니다.');
     return;
   }
@@ -1121,7 +1123,7 @@ app.post('/api/withdrawals', withErrorHandling(async (req, res) => {
     return;
   }
 
-  if (session.role === 'admin' && session.branch_id && rider.branch_id !== session.branch_id) {
+  if (session.role === 'admin' && !isSuperAdmin(session) && rider.branch_id !== session.branch_id) {
     sendError(res, 403, '해당 지점 기사 출금만 처리할 수 있습니다.');
     return;
   }
@@ -1175,7 +1177,7 @@ app.post('/api/withdrawals/:withdrawalId/approve', withErrorHandling(async (req,
     sendError(res, 404, '기사를 찾을 수 없습니다.');
     return;
   }
-  if (session.branch_id && scopedRider.branch_id !== session.branch_id) {
+  if (!isSuperAdmin(session) && scopedRider.branch_id !== session.branch_id) {
     sendError(res, 403, '해당 지점 기사 출금만 처리할 수 있습니다.');
     return;
   }
