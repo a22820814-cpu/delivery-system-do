@@ -372,6 +372,69 @@
       word-break: keep-all;
     }
 
+    .auto-deduct-status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .auto-deduct-status-item {
+      border: 1px solid rgba(20, 108, 135, 0.2);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.84);
+      padding: 10px 12px;
+      min-width: 0;
+    }
+
+    .auto-deduct-status-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .auto-deduct-status-item strong {
+      display: block;
+      color: #155d5e;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 17px;
+      overflow-wrap: anywhere;
+    }
+
+    .history-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+      padding: 10px;
+      border: 1px solid rgba(14, 138, 116, 0.2);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.75);
+    }
+
+    .history-toolbar select,
+    .history-toolbar input {
+      width: auto;
+      min-width: 125px;
+      padding: 8px 10px;
+    }
+
+    .history-page-btn {
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+    }
+
+    .history-page-info {
+      color: #20494b;
+      font-size: 12px;
+      font-weight: 700;
+      min-width: 88px;
+      text-align: center;
+    }
+
     @keyframes lift-in {
       from { opacity: 0; transform: translateY(10px); }
       to { opacity: 1; transform: translateY(0); }
@@ -582,7 +645,10 @@
           <select id="auto-deduct-rider" required>
             <option value="">라이더 선택</option>
           </select>
-          <input id="auto-deduct-amount" type="text" inputmode="numeric" placeholder="하루 차감액" required />
+          <input id="auto-deduct-start-date" type="date" required />
+          <input id="auto-deduct-total-amount" type="text" inputmode="numeric" placeholder="총 자동차감 금액" required />
+          <input id="auto-deduct-total-days" type="number" min="1" step="1" placeholder="분할 일수 (예: 30)" required />
+          <div id="auto-deduct-preview" style="font-size:12px; color:#355;">하루 차감 예정액: 0원</div>
           <select id="auto-deduct-weekday">
             <option value="">매일 실행</option>
             <option value="월">월요일</option>
@@ -604,7 +670,12 @@
           <thead>
             <tr>
               <th>라이더</th>
+              <th>시작일</th>
+              <th>총금액</th>
+              <th>분할일수</th>
               <th>하루 차감액</th>
+              <th>남은일수</th>
+              <th>남은금액</th>
               <th>실행 요일</th>
               <th>상태</th>
               <th>설명</th>
@@ -644,6 +715,18 @@
 
       <div class="card" data-section="recent-deliveries">
         <h2>최근 배달</h2>
+        <div class="history-toolbar" data-view-key="admin-deliveries">
+          <select class="history-mode" data-view-key="admin-deliveries">
+            <option value="all">전체</option>
+            <option value="today">오늘</option>
+            <option value="before">오늘 이전</option>
+            <option value="date">날짜 선택</option>
+          </select>
+          <input type="date" class="history-date" data-view-key="admin-deliveries" hidden />
+          <button type="button" class="history-page-btn history-prev" data-view-key="admin-deliveries">이전</button>
+          <span class="history-page-info" id="admin-deliveries-page-info">1 / 1</span>
+          <button type="button" class="history-page-btn history-next" data-view-key="admin-deliveries">다음</button>
+        </div>
         <table id="deliveries-table">
           <thead>
             <tr>
@@ -662,6 +745,18 @@
 
       <div class="card" data-section="withdrawal-request">
         <h2>출금 요청</h2>
+        <div class="history-toolbar" data-view-key="admin-withdrawals">
+          <select class="history-mode" data-view-key="admin-withdrawals">
+            <option value="all">전체</option>
+            <option value="today">오늘</option>
+            <option value="before">오늘 이전</option>
+            <option value="date">날짜 선택</option>
+          </select>
+          <input type="date" class="history-date" data-view-key="admin-withdrawals" hidden />
+          <button type="button" class="history-page-btn history-prev" data-view-key="admin-withdrawals">이전</button>
+          <span class="history-page-info" id="admin-withdrawals-page-info">1 / 1</span>
+          <button type="button" class="history-page-btn history-next" data-view-key="admin-withdrawals">다음</button>
+        </div>
         <table id="withdrawals-table">
           <thead>
             <tr>
@@ -702,6 +797,7 @@
       <div id="rider-menu" class="dashboard-menu">
         <button type="button" class="menu-btn active" data-dashboard="rider" data-section="all">전체</button>
         <button type="button" class="menu-btn" data-dashboard="rider" data-section="withdraw-request">출금요청</button>
+        <button type="button" class="menu-btn" data-dashboard="rider" data-section="auto-deduct-status">자동차감</button>
         <button type="button" class="menu-btn" data-dashboard="rider" data-section="withdraw-history">출금내역</button>
         <button type="button" class="menu-btn" data-dashboard="rider" data-section="delivery-history">배달내역</button>
       </div>
@@ -759,6 +855,45 @@
         <div id="rider-withdraw-msg" class="message"></div>
       </div>
 
+      <div class="card" data-section="auto-deduct-status">
+        <h2>나의 자동차감 진행 현황</h2>
+        <div id="rider-auto-deduct-empty" style="color:#5f6d6a;">설정된 자동차감이 없습니다.</div>
+        <div id="rider-auto-deduct-status" class="auto-deduct-status-grid" hidden>
+          <div class="auto-deduct-status-item">
+            <span>시작일</span>
+            <strong id="rider-auto-start-date">-</strong>
+          </div>
+          <div class="auto-deduct-status-item">
+            <span>총 자동차감 금액</span>
+            <strong id="rider-auto-total-amount">0원</strong>
+          </div>
+          <div class="auto-deduct-status-item">
+            <span>하루 차감 예정액</span>
+            <strong id="rider-auto-daily-amount">0원</strong>
+          </div>
+          <div class="auto-deduct-status-item">
+            <span>누적 차감액</span>
+            <strong id="rider-auto-deducted-amount">0원</strong>
+          </div>
+          <div class="auto-deduct-status-item">
+            <span>남은 금액</span>
+            <strong id="rider-auto-remaining-amount">0원</strong>
+          </div>
+          <div class="auto-deduct-status-item">
+            <span>남은 일수</span>
+            <strong id="rider-auto-remaining-days">0일</strong>
+          </div>
+          <div class="auto-deduct-status-item">
+            <span>진행 상태</span>
+            <strong id="rider-auto-progress-status">-</strong>
+          </div>
+          <div class="auto-deduct-status-item">
+            <span>설명</span>
+            <strong id="rider-auto-description">-</strong>
+          </div>
+        </div>
+      </div>
+
       <div class="card" data-section="policy">
         <h2>정산/출금 항목 안내</h2>
         <p>원천세(3.3%): 배달 요금의 3.3%</p>
@@ -779,6 +914,18 @@
 
       <div class="card" data-section="delivery-history">
         <h2>나의 배달 기록</h2>
+        <div class="history-toolbar" data-view-key="rider-deliveries">
+          <select class="history-mode" data-view-key="rider-deliveries">
+            <option value="all">전체</option>
+            <option value="today">오늘</option>
+            <option value="before">오늘 이전</option>
+            <option value="date">날짜 선택</option>
+          </select>
+          <input type="date" class="history-date" data-view-key="rider-deliveries" hidden />
+          <button type="button" class="history-page-btn history-prev" data-view-key="rider-deliveries">이전</button>
+          <span class="history-page-info" id="rider-deliveries-page-info">1 / 1</span>
+          <button type="button" class="history-page-btn history-next" data-view-key="rider-deliveries">다음</button>
+        </div>
         <table id="rider-deliveries-table">
           <thead>
             <tr>
@@ -796,6 +943,18 @@
 
       <div class="card" data-section="withdraw-history">
         <h2>나의 출금 기록</h2>
+        <div class="history-toolbar" data-view-key="rider-withdrawals">
+          <select class="history-mode" data-view-key="rider-withdrawals">
+            <option value="all">전체</option>
+            <option value="today">오늘</option>
+            <option value="before">오늘 이전</option>
+            <option value="date">날짜 선택</option>
+          </select>
+          <input type="date" class="history-date" data-view-key="rider-withdrawals" hidden />
+          <button type="button" class="history-page-btn history-prev" data-view-key="rider-withdrawals">이전</button>
+          <span class="history-page-info" id="rider-withdrawals-page-info">1 / 1</span>
+          <button type="button" class="history-page-btn history-next" data-view-key="rider-withdrawals">다음</button>
+        </div>
         <table id="rider-withdrawals-table">
           <thead>
             <tr>
@@ -827,6 +986,13 @@
     let allAdmins = [];
     let currentNotice = "";
     let selectedAdminForReset = null;
+    const HISTORY_PAGE_SIZE = 7;
+    const historyViews = {
+      "admin-deliveries": { mode: "all", date: "", page: 1, pageSize: HISTORY_PAGE_SIZE },
+      "admin-withdrawals": { mode: "all", date: "", page: 1, pageSize: HISTORY_PAGE_SIZE },
+      "rider-deliveries": { mode: "all", date: "", page: 1, pageSize: HISTORY_PAGE_SIZE },
+      "rider-withdrawals": { mode: "all", date: "", page: 1, pageSize: HISTORY_PAGE_SIZE },
+    };
 
     function setMessage(elementId, text, isSuccess) {
       const element = document.getElementById(elementId);
@@ -854,6 +1020,175 @@
 
     function formatKrw(value) {
       return `${formatNumber(value)}원`;
+    }
+
+    function getTodayDateKeyLocal() {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    }
+
+    function getDateKeyFromDateTime(value) {
+      if (!value) {
+        return "";
+      }
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+        return String(value);
+      }
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return "";
+      }
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+
+    function filterHistoryByView(items, viewKey, createdAtField) {
+      const view = historyViews[viewKey];
+      if (!view) {
+        return items;
+      }
+      const todayKey = getTodayDateKeyLocal();
+
+      if (view.mode === "today") {
+        return items.filter((item) => getDateKeyFromDateTime(item[createdAtField]) === todayKey);
+      }
+
+      if (view.mode === "before") {
+        return items.filter((item) => {
+          const itemKey = getDateKeyFromDateTime(item[createdAtField]);
+          return itemKey && itemKey < todayKey;
+        });
+      }
+
+      if (view.mode === "date" && view.date) {
+        return items.filter((item) => getDateKeyFromDateTime(item[createdAtField]) === view.date);
+      }
+
+      return items;
+    }
+
+    function paginateHistory(items, viewKey) {
+      const view = historyViews[viewKey];
+      if (!view) {
+        return { items, page: 1, totalPages: 1 };
+      }
+
+      const totalPages = Math.max(1, Math.ceil(items.length / view.pageSize));
+      if (view.page > totalPages) {
+        view.page = totalPages;
+      }
+      const page = Math.max(1, view.page);
+      const start = (page - 1) * view.pageSize;
+      const end = start + view.pageSize;
+      return {
+        items: items.slice(start, end),
+        page,
+        totalPages,
+      };
+    }
+
+    function updateHistoryPager(viewKey, page, totalPages) {
+      const info = document.getElementById(`${viewKey}-page-info`);
+      const prevBtn = document.querySelector(`.history-prev[data-view-key="${viewKey}"]`);
+      const nextBtn = document.querySelector(`.history-next[data-view-key="${viewKey}"]`);
+
+      if (info) {
+        info.textContent = `${page} / ${totalPages}`;
+      }
+      if (prevBtn) {
+        prevBtn.disabled = page <= 1;
+      }
+      if (nextBtn) {
+        nextBtn.disabled = page >= totalPages;
+      }
+    }
+
+    function updateHistoryDateInputVisibility(viewKey) {
+      const view = historyViews[viewKey];
+      const dateInput = document.querySelector(`.history-date[data-view-key="${viewKey}"]`);
+      if (!view || !dateInput) {
+        return;
+      }
+      const isDateMode = view.mode === "date";
+      dateInput.hidden = !isDateMode;
+      if (isDateMode && !dateInput.value) {
+        dateInput.value = getTodayDateKeyLocal();
+        view.date = dateInput.value;
+      }
+      if (!isDateMode) {
+        view.date = "";
+      }
+    }
+
+    function renderHistoryTable(options) {
+      const { viewKey, items, createdAtField, tbodyId, renderRow, emptyColspan } = options;
+      const filtered = filterHistoryByView(items, viewKey, createdAtField);
+      const paged = paginateHistory(filtered, viewKey);
+      const tbody = document.getElementById(tbodyId);
+      if (!tbody) {
+        return;
+      }
+
+      tbody.innerHTML = paged.items.map(renderRow).join("")
+        || `<tr><td colspan="${emptyColspan}">조건에 맞는 내역이 없습니다.</td></tr>`;
+      updateHistoryPager(viewKey, paged.page, paged.totalPages);
+    }
+
+    function setupHistoryControls() {
+      document.querySelectorAll(".history-mode").forEach((element) => {
+        element.addEventListener("change", () => {
+          const viewKey = element.dataset.viewKey;
+          if (!viewKey || !historyViews[viewKey]) {
+            return;
+          }
+          historyViews[viewKey].mode = element.value;
+          historyViews[viewKey].page = 1;
+          updateHistoryDateInputVisibility(viewKey);
+          refreshData();
+        });
+      });
+
+      document.querySelectorAll(".history-date").forEach((element) => {
+        const input = element;
+        input.value = getTodayDateKeyLocal();
+        input.addEventListener("change", () => {
+          const viewKey = input.dataset.viewKey;
+          if (!viewKey || !historyViews[viewKey]) {
+            return;
+          }
+          historyViews[viewKey].date = input.value;
+          historyViews[viewKey].page = 1;
+          refreshData();
+        });
+      });
+
+      document.querySelectorAll(".history-prev").forEach((button) => {
+        button.addEventListener("click", () => {
+          const viewKey = button.dataset.viewKey;
+          if (!viewKey || !historyViews[viewKey]) {
+            return;
+          }
+          historyViews[viewKey].page = Math.max(1, historyViews[viewKey].page - 1);
+          refreshData();
+        });
+      });
+
+      document.querySelectorAll(".history-next").forEach((button) => {
+        button.addEventListener("click", () => {
+          const viewKey = button.dataset.viewKey;
+          if (!viewKey || !historyViews[viewKey]) {
+            return;
+          }
+          historyViews[viewKey].page += 1;
+          refreshData();
+        });
+      });
+
+      Object.keys(historyViews).forEach((viewKey) => {
+        updateHistoryDateInputVisibility(viewKey);
+      });
     }
 
     function isSystemAdminUser() {
@@ -897,7 +1232,52 @@
       setupMoneyInput("charge-amount");
       setupMoneyInput("delivery-fare");
       setupMoneyInput("rider-withdraw-amount");
-      setupMoneyInput("auto-deduct-amount");
+      setupMoneyInput("auto-deduct-total-amount");
+    }
+
+    function formatDateOnly(value) {
+      if (!value) return "-";
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+        const [year, month, day] = String(value).split("-");
+        return `${year}년 ${month}월 ${day}일`;
+      }
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}년 ${month}월 ${day}일`;
+    }
+
+    function parseDateKeyToEpoch(value) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) {
+        return NaN;
+      }
+      return new Date(`${value}T00:00:00`).getTime();
+    }
+
+    function calculateInstallmentAmount(totalAmount, totalDays, appliedDays) {
+      const safeTotal = Math.max(0, Number(totalAmount) || 0);
+      const safeDays = Math.max(1, Number(totalDays) || 1);
+      const safeApplied = Math.max(0, Number(appliedDays) || 0);
+      const base = Math.floor(safeTotal / safeDays);
+      const remainder = safeTotal % safeDays;
+      return base + (safeApplied < remainder ? 1 : 0);
+    }
+
+    function updateAutoDeductPreview() {
+      const totalAmount = parseMoneyInputValue("auto-deduct-total-amount");
+      const totalDays = Number(document.getElementById("auto-deduct-total-days")?.value || 0);
+      const preview = document.getElementById("auto-deduct-preview");
+      if (!preview) {
+        return;
+      }
+      if (!Number.isInteger(totalDays) || totalDays <= 0 || totalAmount <= 0) {
+        preview.textContent = "하루 차감 예정액: 0원";
+        return;
+      }
+      const dailyAmount = calculateInstallmentAmount(totalAmount, totalDays, 0);
+      preview.textContent = `하루 차감 예정액: ${formatKrw(dailyAmount)}`;
     }
 
     function renderAutoDeductRules() {
@@ -908,7 +1288,14 @@
 
       const rows = allRiders.map((rider) => {
         const rule = allAutoDeductRules.find((item) => item.riderId === rider.id);
-        const dailyAmount = rule ? Number(rule.dailyAmount) || 0 : 0;
+        const totalAmount = rule ? Number(rule.totalAmount) || 0 : 0;
+        const totalDays = rule ? Number(rule.totalDays) || 0 : 0;
+        const deductedAmount = rule ? Number(rule.deductedAmount) || 0 : 0;
+        const appliedDays = rule ? Number(rule.appliedDays) || 0 : 0;
+        const remainingDays = Math.max(totalDays - appliedDays, 0);
+        const remainingAmount = Math.max(totalAmount - deductedAmount, 0);
+        const dailyAmount = calculateInstallmentAmount(totalAmount, totalDays, appliedDays);
+        const startDate = formatDateOnly(rule?.startDate);
         const weekday = rule?.weekday ? `${rule.weekday}요일` : "매일";
         const enabled = rule?.enabled ? "활성" : "비활성";
         const description = rule?.description || "-";
@@ -916,7 +1303,12 @@
         return `
           <tr>
             <td>${rider.name}</td>
+            <td>${startDate}</td>
+            <td>${formatKrw(totalAmount)}</td>
+            <td>${totalDays ? `${formatNumber(totalDays)}일` : '-'}</td>
             <td>${formatKrw(dailyAmount)}</td>
+            <td>${formatNumber(remainingDays)}일</td>
+            <td>${formatKrw(remainingAmount)}</td>
             <td>${weekday}</td>
             <td>${enabled}</td>
             <td>${description}</td>
@@ -925,7 +1317,56 @@
         `;
       }).join("");
 
-      tbody.innerHTML = rows || '<tr><td colspan="6">설정된 규칙이 없습니다.</td></tr>';
+      tbody.innerHTML = rows || '<tr><td colspan="11">설정된 규칙이 없습니다.</td></tr>';
+    }
+
+    function renderRiderAutoDeductStatus() {
+      const riderId = currentUser?.rider_id;
+      const emptyEl = document.getElementById("rider-auto-deduct-empty");
+      const gridEl = document.getElementById("rider-auto-deduct-status");
+      if (!riderId || !emptyEl || !gridEl) {
+        return;
+      }
+
+      const rule = allAutoDeductRules.find((item) => item.riderId === riderId);
+      if (!rule) {
+        emptyEl.hidden = false;
+        gridEl.hidden = true;
+        return;
+      }
+
+      const totalAmount = Number(rule.totalAmount) || 0;
+      const totalDays = Number(rule.totalDays) || 0;
+      const deductedAmount = Number(rule.deductedAmount) || 0;
+      const appliedDays = Number(rule.appliedDays) || 0;
+      const remainingAmount = Math.max(totalAmount - deductedAmount, 0);
+      const remainingDays = Math.max(totalDays - appliedDays, 0);
+      const nextDailyAmount = remainingDays > 0
+        ? calculateInstallmentAmount(totalAmount, totalDays, appliedDays)
+        : 0;
+
+      const today = new Date();
+      const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      const startEpoch = parseDateKeyToEpoch(rule.startDate);
+      const todayEpoch = parseDateKeyToEpoch(todayKey);
+      let progressStatus = rule.enabled ? "진행 중" : "비활성";
+      if (remainingDays <= 0 || remainingAmount <= 0) {
+        progressStatus = "완료";
+      } else if (Number.isFinite(startEpoch) && Number.isFinite(todayEpoch) && todayEpoch < startEpoch) {
+        progressStatus = "시작 전";
+      }
+
+      document.getElementById("rider-auto-start-date").textContent = formatDateOnly(rule.startDate);
+      document.getElementById("rider-auto-total-amount").textContent = formatKrw(totalAmount);
+      document.getElementById("rider-auto-daily-amount").textContent = formatKrw(nextDailyAmount);
+      document.getElementById("rider-auto-deducted-amount").textContent = formatKrw(deductedAmount);
+      document.getElementById("rider-auto-remaining-amount").textContent = formatKrw(remainingAmount);
+      document.getElementById("rider-auto-remaining-days").textContent = `${formatNumber(remainingDays)}일`;
+      document.getElementById("rider-auto-progress-status").textContent = progressStatus;
+      document.getElementById("rider-auto-description").textContent = rule.description || "-";
+
+      emptyEl.hidden = true;
+      gridEl.hidden = false;
     }
 
     function applyDashboardSection(dashboardType, section) {
@@ -1032,6 +1473,13 @@
         if (autoDeductRider) {
           autoDeductRider.innerHTML = '<option value="">라이더 선택</option>' + options;
         }
+        const autoDeductStartDate = document.getElementById("auto-deduct-start-date");
+        if (autoDeductStartDate && !autoDeductStartDate.value) {
+          const now = new Date();
+          const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+          autoDeductStartDate.value = todayKey;
+        }
+        updateAutoDeductPreview();
         
         // 지점 선택 드롭다운 업데이트
         const branchOptions = allBranches.map(b => `<option value="${b.id}">${b.name}</option>`).join("");
@@ -1156,7 +1604,13 @@
         </tr>
       `).join("");
 
-      document.getElementById("deliveries-tbody").innerHTML = allDeliveries.map(d => {
+      renderHistoryTable({
+        viewKey: "admin-deliveries",
+        items: allDeliveries,
+        createdAtField: "createdAt",
+        tbodyId: "deliveries-tbody",
+        emptyColspan: 7,
+        renderRow: (d) => {
         const rider = allRiders.find(r => r.id === d.riderId);
         const statusColor = d.status === "pending" ? "#ff9800" : "#28a745";
         const statusText = d.status === "pending" ? "배달중" : "정산완료";
@@ -1171,9 +1625,16 @@
             <td>${formatKrw(d.final)} <span style="color: ${statusColor}; font-weight: bold; font-size: 0.9em;">(${statusText})</span></td>
           </tr>
         `;
-      }).join("");
+        },
+      });
 
-      document.getElementById("withdrawals-tbody").innerHTML = allWithdrawals.map(w => {
+      renderHistoryTable({
+        viewKey: "admin-withdrawals",
+        items: allWithdrawals,
+        createdAtField: "createdAt",
+        tbodyId: "withdrawals-tbody",
+        emptyColspan: 11,
+        renderRow: (w) => {
         const rider = allRiders.find(r => r.id === w.riderId);
         const statusColor = w.status === "pending" ? "#ff9800" : (w.status === "approved" ? "#28a745" : "#dc3545");
         const statusText = w.status === "pending" ? "대기 중" : (w.status === "approved" ? "승인" : "거부");
@@ -1195,7 +1656,8 @@
             <td>-</td>
           </tr>
         `;
-      }).join("");
+        },
+      });
 
       const profitCard = document.getElementById("system-profit-card");
       const profitStats = document.getElementById("system-profit-stats");
@@ -1263,28 +1725,44 @@
         document.getElementById("rider-info-account").value = rider.account || "";
       }
 
-      document.getElementById("rider-deliveries-tbody").innerHTML = myDeliveries.map(d => `
-        <tr>
-          <td>${d.id}</td>
-          <td>${formatDateTime(d.createdAt)}</td>
-          <td>${formatKrw(d.fare)}</td>
-          <td>${formatKrw(d.fee100 + d.fee16)}</td>
-          <td>${formatKrw(d.final)}</td>
-          <td>${d.status === 'completed' ? '✅ 정산완료' : `<button onclick="completeDelivery(${d.id})" style="background: #28a745; color: white; padding: 5px 10px; border: none; border-radius: 3px; cursor: pointer;">배달완료</button>`}</td>
-        </tr>
-      `).join("");
+      renderHistoryTable({
+        viewKey: "rider-deliveries",
+        items: myDeliveries,
+        createdAtField: "createdAt",
+        tbodyId: "rider-deliveries-tbody",
+        emptyColspan: 6,
+        renderRow: (d) => `
+          <tr>
+            <td>${d.id}</td>
+            <td>${formatDateTime(d.createdAt)}</td>
+            <td>${formatKrw(d.fare)}</td>
+            <td>${formatKrw(d.fee100 + d.fee16)}</td>
+            <td>${formatKrw(d.final)}</td>
+            <td>${d.status === 'completed' ? '✅ 정산완료' : `<button onclick="completeDelivery(${d.id})" style="background: #28a745; color: white; padding: 5px 10px; border: none; border-radius: 3px; cursor: pointer;">배달완료</button>`}</td>
+          </tr>
+        `,
+      });
 
-      document.getElementById("rider-withdrawals-tbody").innerHTML = myWithdrawals.map(w => `
-        <tr>
-          <td>${w.id}</td>
-          <td>${formatKrw(w.amount)}</td>
-          <td>${formatKrw(Number(w.fee) || 0)}</td>
-          <td>${formatKrw(w.amount + (Number(w.fee) || 0))}</td>
-          <td>${formatDateTime(w.createdAt)}</td>
-          <td>${formatDateTime(w.processedAt)}</td>
-          <td>${w.status}</td>
-        </tr>
-      `).join("");
+      renderHistoryTable({
+        viewKey: "rider-withdrawals",
+        items: myWithdrawals,
+        createdAtField: "createdAt",
+        tbodyId: "rider-withdrawals-tbody",
+        emptyColspan: 7,
+        renderRow: (w) => `
+          <tr>
+            <td>${w.id}</td>
+            <td>${formatKrw(w.amount)}</td>
+            <td>${formatKrw(Number(w.fee) || 0)}</td>
+            <td>${formatKrw(w.amount + (Number(w.fee) || 0))}</td>
+            <td>${formatDateTime(w.createdAt)}</td>
+            <td>${formatDateTime(w.processedAt)}</td>
+            <td>${w.status}</td>
+          </tr>
+        `,
+      });
+
+      renderRiderAutoDeductStatus();
     }
 
     document.getElementById("admin-login-form").addEventListener("submit", async (e) => {
@@ -1432,22 +1910,39 @@
     document.getElementById("auto-deduct-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const riderId = Number(document.getElementById("auto-deduct-rider").value);
-      const dailyAmount = parseMoneyInputValue("auto-deduct-amount");
+      const startDate = document.getElementById("auto-deduct-start-date").value;
+      const totalAmount = parseMoneyInputValue("auto-deduct-total-amount");
+      const totalDays = Number(document.getElementById("auto-deduct-total-days").value || 0);
       const weekday = document.getElementById("auto-deduct-weekday").value;
       const description = document.getElementById("auto-deduct-description").value;
       const enabled = document.getElementById("auto-deduct-enabled").checked;
 
+      if (!startDate) {
+        setMessage("auto-deduct-msg", "자동차감 시작일을 선택해 주세요.", false);
+        return;
+      }
+
+      if (!Number.isInteger(totalDays) || totalDays <= 0) {
+        setMessage("auto-deduct-msg", "분할 일수는 1일 이상의 정수여야 합니다.", false);
+        return;
+      }
+
       try {
         const data = await requestJson(`/api/riders/${riderId}/auto-deduct`, {
           method: "POST",
-          body: JSON.stringify({ dailyAmount, weekday, description, enabled })
+          body: JSON.stringify({ startDate, totalAmount, totalDays, weekday, description, enabled })
         });
         setMessage("auto-deduct-msg", data.message, true);
+        document.getElementById("auto-deduct-form").reset();
+        updateAutoDeductPreview();
         await refreshData();
       } catch (error) {
         setMessage("auto-deduct-msg", error.message, false);
       }
     });
+
+    document.getElementById("auto-deduct-total-amount")?.addEventListener("input", updateAutoDeductPreview);
+    document.getElementById("auto-deduct-total-days")?.addEventListener("input", updateAutoDeductPreview);
 
     document.getElementById("rider-info-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -1605,6 +2100,7 @@
 
     setupDashboardMenus();
     setupMoneyInputs();
+    setupHistoryControls();
     resetDashboardMenus();
     refreshData();
     renderNotice();

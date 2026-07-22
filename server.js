@@ -433,6 +433,11 @@ async function initializeDatabase() {
       rider_id INTEGER NOT NULL UNIQUE,
       enabled INTEGER NOT NULL DEFAULT 0,
       daily_amount INTEGER NOT NULL DEFAULT 0,
+      total_amount INTEGER NOT NULL DEFAULT 0,
+      total_days INTEGER NOT NULL DEFAULT 0,
+      deducted_amount INTEGER NOT NULL DEFAULT 0,
+      applied_days INTEGER NOT NULL DEFAULT 0,
+      start_date TEXT,
       weekday TEXT NOT NULL DEFAULT '',
       description TEXT NOT NULL DEFAULT '',
       last_run_date TEXT,
@@ -454,11 +459,21 @@ async function initializeDatabase() {
   await addColumnIfMissing('auto_deduct_rules', 'last_run_date', 'last_run_date TEXT');
   await addColumnIfMissing('auto_deduct_rules', 'created_at', 'created_at TEXT');
   await addColumnIfMissing('auto_deduct_rules', 'updated_at', 'updated_at TEXT');
+  await addColumnIfMissing('auto_deduct_rules', 'total_amount', 'total_amount INTEGER NOT NULL DEFAULT 0');
+  await addColumnIfMissing('auto_deduct_rules', 'total_days', 'total_days INTEGER NOT NULL DEFAULT 0');
+  await addColumnIfMissing('auto_deduct_rules', 'deducted_amount', 'deducted_amount INTEGER NOT NULL DEFAULT 0');
+  await addColumnIfMissing('auto_deduct_rules', 'applied_days', 'applied_days INTEGER NOT NULL DEFAULT 0');
+  await addColumnIfMissing('auto_deduct_rules', 'start_date', 'start_date TEXT');
   await run('UPDATE deliveries SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE withdrawals SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE withdrawals SET fee = COALESCE(fee, 0)');
   await run('UPDATE auto_deduct_rules SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE auto_deduct_rules SET updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)');
+  await run('UPDATE auto_deduct_rules SET total_amount = COALESCE(total_amount, daily_amount * 30) WHERE total_amount <= 0');
+  await run('UPDATE auto_deduct_rules SET total_days = COALESCE(total_days, 30) WHERE total_days <= 0');
+  await run('UPDATE auto_deduct_rules SET deducted_amount = COALESCE(deducted_amount, 0)');
+  await run('UPDATE auto_deduct_rules SET applied_days = COALESCE(applied_days, 0)');
+  await run("UPDATE auto_deduct_rules SET start_date = COALESCE(start_date, date('now', 'localtime'))");
   await run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('global_notice', '')");
 
   const seed = readSeedData();
@@ -575,13 +590,20 @@ async function initializeDatabase() {
       for (const autoRule of seed.autoDeductRules || []) {
         await run(
           `INSERT INTO auto_deduct_rules
-           (id, rider_id, enabled, daily_amount, weekday, description, last_run_date, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, rider_id, enabled, daily_amount, total_amount, total_days,
+            deducted_amount, applied_days, start_date, weekday, description,
+            last_run_date, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             autoRule.id,
             autoRule.riderId,
             autoRule.enabled ? 1 : 0,
             autoRule.dailyAmount || 0,
+            autoRule.totalAmount || ((autoRule.dailyAmount || 0) * (autoRule.totalDays || 30)),
+            autoRule.totalDays || 30,
+            autoRule.deductedAmount || 0,
+            autoRule.appliedDays || 0,
+            autoRule.startDate || getTodayDateKey(),
             autoRule.weekday || '',
             autoRule.description || '',
             autoRule.lastRunDate || null,
@@ -637,8 +659,10 @@ async function readState() {
        ORDER BY id DESC`
     ),
     all(
-      `SELECT id, rider_id AS riderId, enabled, daily_amount AS dailyAmount,
-              weekday, description, last_run_date AS lastRunDate,
+          `SELECT id, rider_id AS riderId, enabled, daily_amount AS dailyAmount,
+            total_amount AS totalAmount, total_days AS totalDays,
+            deducted_amount AS deductedAmount, applied_days AS appliedDays,
+            start_date AS startDate, weekday, description, last_run_date AS lastRunDate,
               created_at AS createdAt, updated_at AS updatedAt
        FROM auto_deduct_rules
        ORDER BY id`
@@ -1115,7 +1139,9 @@ app.post('/api/riders/:riderId/auto-deduct', withErrorHandling(async (req, res) 
 
   const riderId = Number(req.params.riderId);
   const enabled = Boolean(req.body.enabled);
-  const dailyAmount = Number(req.body.dailyAmount);
+  const totalAmount = Number(req.body.totalAmount);
+  const totalDays = Number(req.body.totalDays);
+  const startDate = String(req.body.startDate || '').trim();
   const weekday = String(req.body.weekday || '').trim();
   const description = String(req.body.description || '').trim();
 
@@ -1124,8 +1150,18 @@ app.post('/api/riders/:riderId/auto-deduct', withErrorHandling(async (req, res) 
     return;
   }
 
-  if (!Number.isFinite(dailyAmount) || dailyAmount <= 0 || !Number.isInteger(dailyAmount)) {
-    sendError(res, 400, '자동차감 금액은 1원 이상의 정수여야 합니다.');
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0 || !Number.isInteger(totalAmount)) {
+    sendError(res, 400, '총 자동차감 금액은 1원 이상의 정수여야 합니다.');
+    return;
+  }
+
+  if (!Number.isFinite(totalDays) || totalDays <= 0 || !Number.isInteger(totalDays)) {
+    sendError(res, 400, '분할 일수는 1일 이상의 정수여야 합니다.');
+    return;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+    sendError(res, 400, '시작일은 YYYY-MM-DD 형식이어야 합니다.');
     return;
   }
 
@@ -1150,21 +1186,46 @@ app.post('/api/riders/:riderId/auto-deduct', withErrorHandling(async (req, res) 
     return;
   }
 
+  const dailyAmount = Math.floor(totalAmount / totalDays);
+  if (dailyAmount <= 0) {
+    sendError(res, 400, '총금액이 분할 일수보다 작아 하루 차감액이 0원이 됩니다.');
+    return;
+  }
+
   await run(
-    `INSERT INTO auto_deduct_rules (rider_id, enabled, daily_amount, weekday, description, updated_at)
-     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `INSERT INTO auto_deduct_rules
+     (rider_id, enabled, daily_amount, total_amount, total_days,
+      deducted_amount, applied_days, start_date, weekday, description, last_run_date, updated_at)
+     VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?, NULL, CURRENT_TIMESTAMP)
      ON CONFLICT(rider_id) DO UPDATE SET
        enabled = excluded.enabled,
        daily_amount = excluded.daily_amount,
+       total_amount = excluded.total_amount,
+       total_days = excluded.total_days,
+       deducted_amount = 0,
+       applied_days = 0,
+       start_date = excluded.start_date,
        weekday = excluded.weekday,
        description = excluded.description,
+       last_run_date = NULL,
        updated_at = CURRENT_TIMESTAMP`,
-    [riderId, enabled ? 1 : 0, dailyAmount, weekday, description]
+    [
+      riderId,
+      enabled ? 1 : 0,
+      dailyAmount,
+      totalAmount,
+      totalDays,
+      startDate,
+      weekday,
+      description,
+    ]
   );
 
   const rule = await get(
     `SELECT id, rider_id AS riderId, enabled, daily_amount AS dailyAmount,
-            weekday, description, last_run_date AS lastRunDate,
+            total_amount AS totalAmount, total_days AS totalDays,
+            deducted_amount AS deductedAmount, applied_days AS appliedDays,
+            start_date AS startDate, weekday, description, last_run_date AS lastRunDate,
             created_at AS createdAt, updated_at AS updatedAt
      FROM auto_deduct_rules
      WHERE rider_id = ?`,
@@ -1495,6 +1556,22 @@ function getTodayDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function parseDateKeyToEpoch(dateKey) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || ''))) {
+    return NaN;
+  }
+  return Date.parse(`${dateKey}T00:00:00`);
+}
+
+function calculateInstallmentAmount(totalAmount, totalDays, appliedDays) {
+  const safeTotal = Math.max(0, Number(totalAmount) || 0);
+  const safeDays = Math.max(1, Number(totalDays) || 1);
+  const safeApplied = Math.max(0, Number(appliedDays) || 0);
+  const base = Math.floor(safeTotal / safeDays);
+  const remainder = safeTotal % safeDays;
+  return base + (safeApplied < remainder ? 1 : 0);
+}
+
 async function runAutoDeductionCycle() {
   const now = new Date();
   const today = getTodayDateKey(now);
@@ -1502,8 +1579,10 @@ async function runAutoDeductionCycle() {
 
   const rules = await all(
     `SELECT adr.id, adr.rider_id AS riderId, adr.enabled,
-            adr.daily_amount AS dailyAmount, adr.weekday,
-            adr.description, adr.last_run_date AS lastRunDate,
+            adr.daily_amount AS dailyAmount, adr.total_amount AS totalAmount,
+            adr.total_days AS totalDays, adr.deducted_amount AS deductedAmount,
+            adr.applied_days AS appliedDays, adr.start_date AS startDate,
+            adr.weekday, adr.description, adr.last_run_date AS lastRunDate,
             r.balance
      FROM auto_deduct_rules adr
      JOIN riders r ON r.id = adr.rider_id
@@ -1511,7 +1590,30 @@ async function runAutoDeductionCycle() {
   );
 
   for (const rule of rules) {
-    const amount = Number(rule.dailyAmount) || 0;
+    const totalAmount = Number(rule.totalAmount) || 0;
+    const totalDays = Number(rule.totalDays) || 0;
+    const appliedDays = Number(rule.appliedDays) || 0;
+    const deductedAmount = Number(rule.deductedAmount) || 0;
+
+    if (totalAmount <= 0 || totalDays <= 0) {
+      continue;
+    }
+
+    if (appliedDays >= totalDays || deductedAmount >= totalAmount) {
+      await run(
+        'UPDATE auto_deduct_rules SET enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [rule.id]
+      );
+      continue;
+    }
+
+    const startEpoch = parseDateKeyToEpoch(rule.startDate);
+    const todayEpoch = parseDateKeyToEpoch(today);
+    if (Number.isFinite(startEpoch) && Number.isFinite(todayEpoch) && todayEpoch < startEpoch) {
+      continue;
+    }
+
+    const amount = calculateInstallmentAmount(totalAmount, totalDays, appliedDays);
     if (amount <= 0) {
       continue;
     }
@@ -1528,6 +1630,10 @@ async function runAutoDeductionCycle() {
       continue;
     }
 
+    const nextAppliedDays = appliedDays + 1;
+    const nextDeductedAmount = Math.min(totalAmount, deductedAmount + amount);
+    const shouldDisable = nextAppliedDays >= totalDays || nextDeductedAmount >= totalAmount;
+
     await transaction(async () => {
       await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [amount, rule.riderId]);
       await run(
@@ -1537,15 +1643,21 @@ async function runAutoDeductionCycle() {
         [
           rule.riderId,
           amount,
-          1,
+          nextAppliedDays,
           rule.weekday || todayWeekday,
           amount,
           rule.description || '자동차감',
         ]
       );
       await run(
-        'UPDATE auto_deduct_rules SET last_run_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [today, rule.id]
+        `UPDATE auto_deduct_rules
+         SET last_run_date = ?,
+             applied_days = ?,
+             deducted_amount = ?,
+             enabled = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [today, nextAppliedDays, nextDeductedAmount, shouldDisable ? 0 : 1, rule.id]
       );
     });
   }
