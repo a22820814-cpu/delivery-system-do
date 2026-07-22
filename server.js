@@ -184,12 +184,51 @@ function requireSuperAdmin(req, res) {
 }
 
 function buildStateForSession(session, state) {
+  const resolveBaeminForBranch = (branchId) => {
+    if (!branchId) {
+      return {
+        linked: false,
+        branchId: null,
+        branchName: '',
+        partnerId: '',
+        storeId: '',
+        apiKeyMasked: '',
+        linkedAt: '',
+        lastSyncAt: '',
+      };
+    }
+    const found = (state.baeminBizIntegrations || []).find((item) => item.branchId === branchId);
+    if (!found) {
+      return {
+        linked: false,
+        branchId,
+        branchName: state.branches.find((branch) => branch.id === branchId)?.name || '',
+        partnerId: '',
+        storeId: '',
+        apiKeyMasked: '',
+        linkedAt: '',
+        lastSyncAt: '',
+      };
+    }
+    return {
+      linked: Boolean(found.linked),
+      branchId: found.branchId,
+      branchName: found.branchName || '',
+      partnerId: found.partnerId || '',
+      storeId: found.storeId || '',
+      apiKeyMasked: found.apiKey ? String(found.apiKey).replace(/.(?=.{4})/g, '*') : '',
+      linkedAt: found.linkedAt || '',
+      lastSyncAt: found.lastSyncAt || '',
+    };
+  };
+
   if (session.role === 'admin') {
     if (isSuperAdmin(session)) {
       return {
         ...state,
         admins: state.admins,
         subAdmins: [],
+        baeminBiz: resolveBaeminForBranch(state.branches[0]?.id || null),
       };
     }
 
@@ -206,6 +245,13 @@ function buildStateForSession(session, state) {
       admins: state.admins.filter((admin) => admin.id === session.userId),
       subAdmins: [],
       notice: state.notice,
+      businessAccount: {
+        ...state.businessAccount,
+        accountNumber: state.businessAccount?.accountNumber
+          ? String(state.businessAccount.accountNumber).replace(/.(?=.{4})/g, '*')
+          : '',
+      },
+      baeminBiz: resolveBaeminForBranch(session.branch_id || null),
     };
   }
 
@@ -220,6 +266,24 @@ function buildStateForSession(session, state) {
     chargeLogs: state.chargeLogs.filter((chargeLog) => chargeLog.riderId === session.userId),
     autoDeductRules: state.autoDeductRules.filter((rule) => rule.riderId === session.userId),
     notice: state.notice,
+    businessAccount: {
+      linked: false,
+      bankName: '',
+      accountNumber: '',
+      accountHolder: '',
+      linkedAt: '',
+      balance: 0,
+    },
+    baeminBiz: {
+      linked: false,
+      branchId: null,
+      branchName: '',
+      partnerId: '',
+      storeId: '',
+      apiKeyMasked: '',
+      linkedAt: '',
+      lastSyncAt: '',
+    },
   };
 }
 
@@ -337,6 +401,7 @@ async function initializeDatabase() {
       username TEXT NOT NULL UNIQUE,
       password TEXT NOT NULL,
       name TEXT NOT NULL,
+      balance INTEGER NOT NULL DEFAULT 0,
       branch_id INTEGER,
       FOREIGN KEY (branch_id) REFERENCES branches(id)
     )
@@ -448,12 +513,29 @@ async function initializeDatabase() {
     )
   `);
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS baemin_biz_integrations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      branch_id INTEGER NOT NULL UNIQUE,
+      linked INTEGER NOT NULL DEFAULT 0,
+      partner_id TEXT NOT NULL DEFAULT '',
+      store_id TEXT NOT NULL DEFAULT '',
+      api_key TEXT NOT NULL DEFAULT '',
+      base_url TEXT NOT NULL DEFAULT '',
+      linked_at TEXT,
+      last_sync_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (branch_id) REFERENCES branches(id)
+    )
+  `);
+
   await addColumnIfMissing('withdrawals', 'created_at', 'created_at TEXT');
   await addColumnIfMissing('withdrawals', 'processed_at', 'processed_at TEXT');
   await addColumnIfMissing('withdrawals', 'fee', 'fee INTEGER');
   await addColumnIfMissing('deliveries', 'created_at', 'created_at TEXT');
   await addColumnIfMissing('deduction_logs', 'daily_amount', 'daily_amount INTEGER');
   await addColumnIfMissing('deduction_logs', 'total_days', 'total_days INTEGER');
+  await addColumnIfMissing('admins', 'balance', 'balance INTEGER NOT NULL DEFAULT 0');
   await addColumnIfMissing('branches', 'balance', 'balance INTEGER NOT NULL DEFAULT 0');
   await addColumnIfMissing('admins', 'branch_id', 'branch_id INTEGER');
   await addColumnIfMissing('charge_logs', 'created_by_admin_id', 'created_by_admin_id INTEGER');
@@ -466,6 +548,7 @@ async function initializeDatabase() {
   await addColumnIfMissing('auto_deduct_rules', 'deducted_amount', 'deducted_amount INTEGER NOT NULL DEFAULT 0');
   await addColumnIfMissing('auto_deduct_rules', 'applied_days', 'applied_days INTEGER NOT NULL DEFAULT 0');
   await addColumnIfMissing('auto_deduct_rules', 'start_date', 'start_date TEXT');
+  await addColumnIfMissing('baemin_biz_integrations', 'base_url', "base_url TEXT NOT NULL DEFAULT ''");
   await run('UPDATE deliveries SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE withdrawals SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE withdrawals SET fee = COALESCE(fee, 0)');
@@ -477,6 +560,12 @@ async function initializeDatabase() {
   await run('UPDATE auto_deduct_rules SET applied_days = COALESCE(applied_days, 0)');
   await run("UPDATE auto_deduct_rules SET start_date = COALESCE(start_date, date('now', 'localtime'))");
   await run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('global_notice', '')");
+  await run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('business_account_bank', '')");
+  await run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('business_account_number', '')");
+  await run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('business_account_holder', '')");
+  await run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('business_account_linked', '0')");
+  await run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('business_account_linked_at', '')");
+  await run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('business_account_balance', '0')");
 
   const seed = readSeedData();
   const branchCount = await get('SELECT COUNT(*) AS count FROM branches');
@@ -484,12 +573,13 @@ async function initializeDatabase() {
     await transaction(async () => {
       for (const admin of seed.admins) {
         await run(
-          'INSERT INTO admins (id, username, password, name, branch_id) VALUES (?, ?, ?, ?, ?)',
+          'INSERT INTO admins (id, username, password, name, balance, branch_id) VALUES (?, ?, ?, ?, ?, ?)',
           [
             admin.id,
             admin.username,
             isPasswordHash(admin.password) ? admin.password : hashPassword(admin.password),
             admin.name,
+            admin.balance || 0,
             admin.branch_id || null,
           ]
         );
@@ -620,8 +710,8 @@ async function initializeDatabase() {
   const adminCount = await get('SELECT COUNT(*) AS count FROM admins');
   if (adminCount.count === 0) {
     await run(
-      'INSERT INTO admins (username, password, name, branch_id) VALUES (?, ?, ?, ?)',
-      [DEFAULT_ADMIN_USERNAME, hashPassword(process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD), '시스템 관리자', null]
+      'INSERT INTO admins (username, password, name, balance, branch_id) VALUES (?, ?, ?, ?, ?)',
+      [DEFAULT_ADMIN_USERNAME, hashPassword(process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD), '시스템 관리자', 0, null]
     );
   }
 
@@ -629,8 +719,25 @@ async function initializeDatabase() {
 }
 
 async function readState() {
-  const [admins, branches, riders, deliveries, withdrawals, deductionLogs, chargeLogs, autoDeductRules, noticeRow] = await Promise.all([
-    all('SELECT id, username, name, branch_id FROM admins ORDER BY id'),
+  const [
+    admins,
+    branches,
+    riders,
+    deliveries,
+    withdrawals,
+    deductionLogs,
+    chargeLogs,
+    autoDeductRules,
+    noticeRow,
+    businessBankRow,
+    businessNumberRow,
+    businessHolderRow,
+    businessLinkedRow,
+    businessLinkedAtRow,
+    businessBalanceRow,
+    baeminBizIntegrations,
+  ] = await Promise.all([
+    all('SELECT id, username, name, balance, branch_id FROM admins ORDER BY id'),
     all('SELECT id, name, balance FROM branches ORDER BY id'),
     all('SELECT id, username, name, balance, bank, account, branch_id FROM riders ORDER BY id'),
     all(
@@ -670,6 +777,21 @@ async function readState() {
        ORDER BY id`
     ),
     get("SELECT value FROM app_settings WHERE key = 'global_notice'"),
+    get("SELECT value FROM app_settings WHERE key = 'business_account_bank'"),
+    get("SELECT value FROM app_settings WHERE key = 'business_account_number'"),
+    get("SELECT value FROM app_settings WHERE key = 'business_account_holder'"),
+    get("SELECT value FROM app_settings WHERE key = 'business_account_linked'"),
+    get("SELECT value FROM app_settings WHERE key = 'business_account_linked_at'"),
+    get("SELECT value FROM app_settings WHERE key = 'business_account_balance'"),
+    all(
+      `SELECT bbi.branch_id AS branchId, b.name AS branchName,
+              bbi.linked, bbi.partner_id AS partnerId, bbi.store_id AS storeId,
+              bbi.api_key AS apiKey, bbi.linked_at AS linkedAt,
+              bbi.last_sync_at AS lastSyncAt
+       FROM baemin_biz_integrations bbi
+       JOIN branches b ON b.id = bbi.branch_id
+       ORDER BY bbi.branch_id`
+    ),
   ]);
 
   return {
@@ -683,7 +805,29 @@ async function readState() {
     chargeLogs,
     autoDeductRules,
     notice: noticeRow?.value || '',
+    businessAccount: {
+      linked: Number(businessLinkedRow?.value || 0) === 1,
+      bankName: businessBankRow?.value || '',
+      accountNumber: businessNumberRow?.value || '',
+      accountHolder: businessHolderRow?.value || '',
+      linkedAt: businessLinkedAtRow?.value || '',
+      balance: Number(businessBalanceRow?.value || 0),
+    },
+    baeminBizIntegrations,
   };
+}
+
+async function creditBusinessAccount(amount) {
+  const safeAmount = Number(amount) || 0;
+  if (safeAmount <= 0) {
+    return;
+  }
+  await run(
+    `UPDATE app_settings
+     SET value = CAST(COALESCE(value, '0') AS INTEGER) + ?
+     WHERE key = 'business_account_balance'`,
+    [safeAmount]
+  );
 }
 
 app.get('/', (req, res) => {
@@ -1004,6 +1148,7 @@ app.post('/api/riders/:riderId/charge', withErrorHandling(async (req, res) => {
        VALUES (?, ?, ?, ?, ?)`,
       [riderId, amount, fee, netAmount, session.userId]
     );
+    await creditBusinessAccount(fee);
   });
   const updatedRider = await get(
     'SELECT id, username, name, balance, bank, account, branch_id FROM riders WHERE id = ?',
@@ -1241,6 +1386,251 @@ app.post('/api/riders/:riderId/auto-deduct', withErrorHandling(async (req, res) 
   });
 }));
 
+app.post('/api/riders/me/auto-deduct-now', withErrorHandling(async (req, res) => {
+  const session = requireRole(req, res, ['rider']);
+  if (!session) {
+    return;
+  }
+
+  const riderId = session.userId;
+  const today = getTodayDateKey(new Date());
+
+  const rule = await get(
+    `SELECT adr.id, adr.rider_id AS riderId, adr.enabled,
+            adr.daily_amount AS dailyAmount, adr.total_amount AS totalAmount,
+            adr.total_days AS totalDays, adr.deducted_amount AS deductedAmount,
+            adr.applied_days AS appliedDays, adr.start_date AS startDate,
+            adr.weekday, adr.description, adr.last_run_date AS lastRunDate,
+            r.balance, r.branch_id AS branchId
+     FROM auto_deduct_rules adr
+     JOIN riders r ON r.id = adr.rider_id
+     WHERE adr.rider_id = ?`,
+    [riderId]
+  );
+
+  if (!rule || !rule.enabled) {
+    sendError(res, 400, '활성화된 자동차감 규칙이 없습니다.');
+    return;
+  }
+
+  const totalAmount = Number(rule.totalAmount) || 0;
+  const totalDays = Number(rule.totalDays) || 0;
+  const appliedDays = Number(rule.appliedDays) || 0;
+  const deductedAmount = Number(rule.deductedAmount) || 0;
+
+  if (totalAmount <= 0 || totalDays <= 0 || appliedDays >= totalDays || deductedAmount >= totalAmount) {
+    sendError(res, 400, '자동차감이 이미 완료되었거나 규칙 정보가 올바르지 않습니다.');
+    return;
+  }
+
+  const startEpoch = parseDateKeyToEpoch(rule.startDate);
+  const todayEpoch = parseDateKeyToEpoch(today);
+  if (Number.isFinite(startEpoch) && Number.isFinite(todayEpoch) && todayEpoch < startEpoch) {
+    sendError(res, 400, `자동차감 시작일(${rule.startDate}) 이후에 실행할 수 있습니다.`);
+    return;
+  }
+
+  if (rule.lastRunDate === today) {
+    sendError(res, 400, '오늘은 이미 자동차감이 실행되었습니다.');
+    return;
+  }
+
+  const amount = calculateInstallmentAmount(totalAmount, totalDays, appliedDays);
+  if (amount <= 0) {
+    sendError(res, 400, '오늘 차감할 금액이 없습니다.');
+    return;
+  }
+
+  if (Number(rule.balance) < amount) {
+    sendError(res, 400, '잔액이 부족하여 즉시 자동차감을 실행할 수 없습니다.');
+    return;
+  }
+
+  const nextAppliedDays = appliedDays + 1;
+  const nextDeductedAmount = Math.min(totalAmount, deductedAmount + amount);
+  const shouldDisable = nextAppliedDays >= totalDays || nextDeductedAmount >= totalAmount;
+
+  await transaction(async () => {
+    await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [amount, riderId]);
+    if (rule.branchId) {
+      await run('UPDATE branches SET balance = balance + ? WHERE id = ?', [amount, rule.branchId]);
+      await creditBranchAdmins(rule.branchId, amount);
+    }
+    await run(
+      `INSERT INTO deduction_logs
+       (rider_id, amount, days_count, weekday, monthly_auto, daily_amount, total_days, description, created_by_role)
+       VALUES (?, ?, ?, ?, 1, ?, NULL, ?, 'rider-immediate')`,
+      [
+        riderId,
+        amount,
+        nextAppliedDays,
+        rule.weekday || '',
+        amount,
+        rule.description || '자동차감 즉시 실행',
+      ]
+    );
+    await run(
+      `UPDATE auto_deduct_rules
+       SET last_run_date = ?,
+           applied_days = ?,
+           deducted_amount = ?,
+           enabled = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [today, nextAppliedDays, nextDeductedAmount, shouldDisable ? 0 : 1, rule.id]
+    );
+  });
+
+  res.json({
+    success: true,
+    message: '자동차감 즉시 실행 완료 (지점 관리자 적립 반영)',
+    deduction: {
+      riderId,
+      amount,
+      appliedDays: nextAppliedDays,
+      remainingDays: Math.max(totalDays - nextAppliedDays, 0),
+      remainingAmount: Math.max(totalAmount - nextDeductedAmount, 0),
+      branchId: rule.branchId || null,
+    },
+  });
+}));
+
+app.get('/api/riders/me/arrears', withErrorHandling(async (req, res) => {
+  const session = requireRole(req, res, ['rider']);
+  if (!session) {
+    return;
+  }
+
+  const riderId = session.userId;
+  const today = getTodayDateKey(new Date());
+
+  const rule = await get(
+    `SELECT id, rider_id AS riderId, enabled,
+            daily_amount AS dailyAmount, total_amount AS totalAmount,
+            total_days AS totalDays, deducted_amount AS deductedAmount,
+            applied_days AS appliedDays, start_date AS startDate,
+            weekday, description, last_run_date AS lastRunDate
+     FROM auto_deduct_rules
+     WHERE rider_id = ?`,
+    [riderId]
+  );
+
+  if (!rule) {
+    res.json({
+      success: true,
+      data: {
+        hasRule: false,
+        summary: {
+          todayExpected: 0,
+          todayActual: 0,
+          todayMissed: 0,
+          totalMissed: 0,
+          missedDays: 0,
+        },
+        rows: [],
+      },
+    });
+    return;
+  }
+
+  const totalAmount = Number(rule.totalAmount) || 0;
+  const totalDays = Math.max(0, Number(rule.totalDays) || 0);
+  const startEpoch = parseDateKeyToEpoch(rule.startDate);
+  if (!Number.isFinite(startEpoch) || totalAmount <= 0 || totalDays <= 0) {
+    res.json({
+      success: true,
+      data: {
+        hasRule: true,
+        rule,
+        summary: {
+          todayExpected: 0,
+          todayActual: 0,
+          todayMissed: 0,
+          totalMissed: 0,
+          missedDays: 0,
+        },
+        rows: [],
+      },
+    });
+    return;
+  }
+
+  const logs = await all(
+    `SELECT days_count AS daysCount, amount, created_at AS createdAt
+     FROM deduction_logs
+     WHERE rider_id = ? AND monthly_auto = 1
+     ORDER BY created_at ASC, id ASC`,
+    [riderId]
+  );
+
+  const paidByInstallment = new Map();
+  for (const log of logs) {
+    const idx = Number(log.daysCount) || 0;
+    if (idx > 0 && idx <= totalDays && !paidByInstallment.has(idx)) {
+      paidByInstallment.set(idx, log);
+    }
+  }
+
+  const duePlan = [];
+  const cursor = new Date(startEpoch);
+  const maxIterations = Math.max(366, totalDays * 10);
+  let installmentIndex = 1;
+  let iteration = 0;
+
+  while (installmentIndex <= totalDays && iteration < maxIterations) {
+    const dateKey = getTodayDateKey(cursor);
+    const isDueDate = !rule.weekday || KOREAN_WEEKDAYS[cursor.getDay()] === rule.weekday;
+    if (isDueDate) {
+      duePlan.push({
+        installmentIndex,
+        dateKey,
+        expectedAmount: calculateInstallmentAmount(totalAmount, totalDays, installmentIndex - 1),
+      });
+      installmentIndex += 1;
+    }
+    cursor.setDate(cursor.getDate() + 1);
+    iteration += 1;
+  }
+
+  const dueRows = duePlan
+    .filter((entry) => entry.dateKey <= today)
+    .map((entry) => {
+      const paidLog = paidByInstallment.get(entry.installmentIndex);
+      const paidDateKey = paidLog ? getTodayDateKey(new Date(paidLog.createdAt)) : '';
+      const isPaidOnDueDate = paidLog && paidDateKey === entry.dateKey;
+      const actualAmount = isPaidOnDueDate ? (Number(paidLog.amount) || 0) : 0;
+      const shortfallAmount = Math.max(entry.expectedAmount - actualAmount, 0);
+      return {
+        installmentIndex: entry.installmentIndex,
+        dateKey: entry.dateKey,
+        expectedAmount: entry.expectedAmount,
+        actualAmount,
+        shortfallAmount,
+        check: shortfallAmount <= 0 ? 'O' : 'X',
+      };
+    });
+
+  const todayRow = dueRows.find((row) => row.dateKey === today) || null;
+  const totalMissed = dueRows.reduce((sum, row) => sum + row.shortfallAmount, 0);
+  const missedDays = dueRows.filter((row) => row.shortfallAmount > 0).length;
+
+  res.json({
+    success: true,
+    data: {
+      hasRule: true,
+      rule,
+      summary: {
+        todayExpected: todayRow?.expectedAmount || 0,
+        todayActual: todayRow?.actualAmount || 0,
+        todayMissed: todayRow?.shortfallAmount || 0,
+        totalMissed,
+        missedDays,
+      },
+      rows: dueRows.reverse(),
+    },
+  });
+}));
+
 app.post('/api/deliveries', withErrorHandling(async (req, res) => {
   const session = requireAdmin(req, res);
   if (!session) {
@@ -1352,12 +1742,44 @@ app.post('/api/riders/:riderId/info', withErrorHandling(async (req, res) => {
     return;
   }
 
+  const beforeAutoRule = await get(
+    `SELECT id, rider_id AS riderId, enabled, daily_amount AS dailyAmount,
+            total_amount AS totalAmount, total_days AS totalDays,
+            deducted_amount AS deductedAmount, applied_days AS appliedDays,
+            start_date AS startDate, weekday, description,
+            last_run_date AS lastRunDate
+     FROM auto_deduct_rules
+     WHERE rider_id = ?`,
+    [riderId]
+  );
+
   await run('UPDATE riders SET name = ?, bank = ?, account = ? WHERE id = ?', [name, bank, account, riderId]);
+
+  const afterAutoRule = await get(
+    `SELECT id, rider_id AS riderId, enabled, daily_amount AS dailyAmount,
+            total_amount AS totalAmount, total_days AS totalDays,
+            deducted_amount AS deductedAmount, applied_days AS appliedDays,
+            start_date AS startDate, weekday, description,
+            last_run_date AS lastRunDate
+     FROM auto_deduct_rules
+     WHERE rider_id = ?`,
+    [riderId]
+  );
+
   const updatedRider = await get(
     'SELECT id, username, name, balance, bank, account, branch_id FROM riders WHERE id = ?',
     [riderId]
   );
-  res.json({ success: true, message: '정보 저장 완료', rider: updatedRider });
+  res.json({
+    success: true,
+    message: '정보 저장 완료 (자동차감 설정 유지)',
+    rider: updatedRider,
+    autoDeduct: {
+      preserved: true,
+      before: beforeAutoRule || null,
+      after: afterAutoRule || null,
+    },
+  });
 }));
 
 app.post('/api/withdrawals', withErrorHandling(async (req, res) => {
@@ -1403,6 +1825,7 @@ app.post('/api/withdrawals', withErrorHandling(async (req, res) => {
        VALUES (?, ?, ?, 'approved', CURRENT_TIMESTAMP)`,
       [riderId, amount, fee]
     );
+    await creditBusinessAccount(fee);
     return insertResult;
   });
   const createdWithdrawal = await get(
@@ -1467,6 +1890,7 @@ app.post('/api/withdrawals/:withdrawalId/approve', withErrorHandling(async (req,
   await transaction(async () => {
     await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [totalDeduction, withdrawal.riderId]);
     await run(`UPDATE withdrawals SET status = 'approved', processed_at = CURRENT_TIMESTAMP WHERE id = ?`, [withdrawalId]);
+    await creditBusinessAccount(withdrawalFee);
   });
 
   const updatedWithdrawal = await get(
@@ -1551,6 +1975,371 @@ app.post('/api/notice', withErrorHandling(async (req, res) => {
   res.json({ success: true, message: '공지 저장 완료', notice });
 }));
 
+app.get('/api/business-account', withErrorHandling(async (req, res) => {
+  const session = requireSuperAdmin(req, res);
+  if (!session) {
+    return;
+  }
+
+  const state = await readState();
+  res.json({
+    success: true,
+    data: state.businessAccount,
+  });
+}));
+
+app.post('/api/business-account/link', withErrorHandling(async (req, res) => {
+  const session = requireSuperAdmin(req, res);
+  if (!session) {
+    return;
+  }
+
+  const bankName = String(req.body.bankName || '').trim();
+  const accountNumber = String(req.body.accountNumber || '').trim();
+  const accountHolder = String(req.body.accountHolder || '').trim();
+
+  if (!bankName || !accountNumber || !accountHolder) {
+    sendError(res, 400, '은행명/계좌번호/예금주를 모두 입력해 주세요.');
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  await transaction(async () => {
+    await run("UPDATE app_settings SET value = ? WHERE key = 'business_account_bank'", [bankName]);
+    await run("UPDATE app_settings SET value = ? WHERE key = 'business_account_number'", [accountNumber]);
+    await run("UPDATE app_settings SET value = ? WHERE key = 'business_account_holder'", [accountHolder]);
+    await run("UPDATE app_settings SET value = '1' WHERE key = 'business_account_linked'");
+    await run("UPDATE app_settings SET value = ? WHERE key = 'business_account_linked_at'", [nowIso]);
+  });
+
+  const state = await readState();
+  res.json({ success: true, message: '사업자 통장 연동 완료', data: state.businessAccount });
+}));
+
+app.post('/api/business-account/unlink', withErrorHandling(async (req, res) => {
+  const session = requireSuperAdmin(req, res);
+  if (!session) {
+    return;
+  }
+
+  await run("UPDATE app_settings SET value = '0' WHERE key = 'business_account_linked'");
+  const state = await readState();
+  res.json({ success: true, message: '사업자 통장 연동 해제 완료', data: state.businessAccount });
+}));
+
+function formatBaeminBizIntegrationRow(row, fallbackBranchId = null, fallbackBranchName = '') {
+  const branchId = row?.branchId || fallbackBranchId || null;
+  const branchName = row?.branchName || fallbackBranchName || '';
+  const apiKey = row?.apiKey || '';
+  return {
+    linked: Boolean(row?.linked),
+    branchId,
+    branchName,
+    partnerId: row?.partnerId || '',
+    storeId: row?.storeId || '',
+    baseUrl: row?.baseUrl || '',
+    apiKeyMasked: apiKey ? String(apiKey).replace(/.(?=.{4})/g, '*') : '',
+    linkedAt: row?.linkedAt || '',
+    lastSyncAt: row?.lastSyncAt || '',
+  };
+}
+
+function normalizeUrl(url) {
+  const text = String(url || '').trim();
+  if (!text) {
+    return '';
+  }
+  try {
+    const parsed = new URL(text);
+    return parsed.toString().replace(/\/$/, '');
+  } catch (error) {
+    return '';
+  }
+}
+
+async function callBaeminConnectBizApi({ baseUrl, syncPath, apiKey, partnerId, storeId }) {
+  if (typeof fetch !== 'function') {
+    throw new Error('현재 서버 런타임에서 fetch를 사용할 수 없습니다.');
+  }
+
+  const cleanBase = normalizeUrl(baseUrl);
+  if (!cleanBase) {
+    throw new Error('배민커넥트비즈 API 베이스 URL이 올바르지 않습니다.');
+  }
+
+  const cleanPath = String(syncPath || '/v1/orders').trim().startsWith('/')
+    ? String(syncPath || '/v1/orders').trim()
+    : `/${String(syncPath || '/v1/orders').trim()}`;
+
+  const url = new URL(`${cleanBase}${cleanPath}`);
+  if (storeId) {
+    url.searchParams.set('storeId', storeId);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'X-Partner-Id': partnerId || '',
+        Accept: 'application/json',
+      },
+      signal: controller.signal,
+    });
+
+    const rawText = await response.text();
+    let payload = null;
+    try {
+      payload = rawText ? JSON.parse(rawText) : null;
+    } catch (error) {
+      payload = rawText;
+    }
+
+    if (!response.ok) {
+      const shortBody = typeof payload === 'string'
+        ? payload.slice(0, 400)
+        : JSON.stringify(payload).slice(0, 400);
+      throw new Error(`배민 API 호출 실패 (${response.status}): ${shortBody}`);
+    }
+
+    let importedOrders = 0;
+    if (Array.isArray(payload)) {
+      importedOrders = payload.length;
+    } else if (payload && Array.isArray(payload.orders)) {
+      importedOrders = payload.orders.length;
+    } else if (payload && payload.data && Array.isArray(payload.data)) {
+      importedOrders = payload.data.length;
+    }
+
+    return { importedOrders, payload };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function resolveBaeminTargetBranchId(session, rawBranchId) {
+  if (!isSuperAdmin(session)) {
+    return session.branch_id || null;
+  }
+
+  const requested = Number(rawBranchId);
+  if (!Number.isInteger(requested) || requested <= 0) {
+    return null;
+  }
+  return requested;
+}
+
+async function findBaeminIntegrationByBranchId(branchId) {
+  return get(
+    `SELECT bbi.branch_id AS branchId, b.name AS branchName,
+            bbi.linked, bbi.partner_id AS partnerId,
+            bbi.store_id AS storeId, bbi.api_key AS apiKey,
+            bbi.base_url AS baseUrl,
+            bbi.linked_at AS linkedAt, bbi.last_sync_at AS lastSyncAt
+     FROM baemin_biz_integrations bbi
+     JOIN branches b ON b.id = bbi.branch_id
+     WHERE bbi.branch_id = ?`,
+    [branchId]
+  );
+}
+
+app.get('/api/baemin-biz', withErrorHandling(async (req, res) => {
+  const session = requireAdmin(req, res);
+  if (!session) {
+    return;
+  }
+
+  const branchId = await resolveBaeminTargetBranchId(session, req.query.branchId);
+  if (!branchId) {
+    sendError(res, 400, '지점을 선택해 주세요.');
+    return;
+  }
+
+  const branch = await get('SELECT id, name FROM branches WHERE id = ?', [branchId]);
+  if (!branch) {
+    sendError(res, 404, '지점을 찾을 수 없습니다.');
+    return;
+  }
+
+  if (!isSuperAdmin(session) && session.branch_id !== branchId) {
+    sendError(res, 403, '본인 지점만 조회할 수 있습니다.');
+    return;
+  }
+
+  const found = await findBaeminIntegrationByBranchId(branchId);
+  res.json({
+    success: true,
+    data: formatBaeminBizIntegrationRow(found, branch.id, branch.name),
+  });
+}));
+
+app.post('/api/baemin-biz/link', withErrorHandling(async (req, res) => {
+  const session = requireAdmin(req, res);
+  if (!session) {
+    return;
+  }
+
+  const branchId = await resolveBaeminTargetBranchId(session, req.body.branchId);
+  if (!branchId) {
+    sendError(res, 400, '지점을 선택해 주세요.');
+    return;
+  }
+
+  const branch = await get('SELECT id, name FROM branches WHERE id = ?', [branchId]);
+  if (!branch) {
+    sendError(res, 404, '지점을 찾을 수 없습니다.');
+    return;
+  }
+
+  if (!isSuperAdmin(session) && session.branch_id !== branchId) {
+    sendError(res, 403, '본인 지점만 설정할 수 있습니다.');
+    return;
+  }
+
+  const partnerId = String(req.body.partnerId || '').trim();
+  const storeId = String(req.body.storeId || '').trim();
+  const apiKey = String(req.body.apiKey || '').trim();
+  const baseUrl = normalizeUrl(req.body.baseUrl || '');
+  if (!partnerId || !storeId || !apiKey) {
+    sendError(res, 400, '파트너 ID, 스토어 ID, API 키를 모두 입력해 주세요.');
+    return;
+  }
+
+  if (!baseUrl) {
+    sendError(res, 400, '배민커넥트비즈 API 베이스 URL을 입력해 주세요.');
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  await run(
+    `INSERT INTO baemin_biz_integrations
+     (branch_id, linked, partner_id, store_id, api_key, base_url, linked_at, updated_at)
+     VALUES (?, 1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(branch_id) DO UPDATE SET
+       linked = 1,
+       partner_id = excluded.partner_id,
+       store_id = excluded.store_id,
+       api_key = excluded.api_key,
+       base_url = excluded.base_url,
+       linked_at = excluded.linked_at,
+       updated_at = CURRENT_TIMESTAMP`,
+    [branchId, partnerId, storeId, apiKey, baseUrl, nowIso]
+  );
+
+  const found = await findBaeminIntegrationByBranchId(branchId);
+  res.json({
+    success: true,
+    message: `${branch.name} 배민비즈 연동 저장 완료`,
+    data: formatBaeminBizIntegrationRow(found, branch.id, branch.name),
+  });
+}));
+
+app.post('/api/baemin-biz/unlink', withErrorHandling(async (req, res) => {
+  const session = requireAdmin(req, res);
+  if (!session) {
+    return;
+  }
+
+  const branchId = await resolveBaeminTargetBranchId(session, req.body.branchId);
+  if (!branchId) {
+    sendError(res, 400, '지점을 선택해 주세요.');
+    return;
+  }
+
+  const branch = await get('SELECT id, name FROM branches WHERE id = ?', [branchId]);
+  if (!branch) {
+    sendError(res, 404, '지점을 찾을 수 없습니다.');
+    return;
+  }
+
+  if (!isSuperAdmin(session) && session.branch_id !== branchId) {
+    sendError(res, 403, '본인 지점만 해제할 수 있습니다.');
+    return;
+  }
+
+  await run(
+    `INSERT INTO baemin_biz_integrations
+     (branch_id, linked, partner_id, store_id, api_key, base_url, linked_at, updated_at)
+     VALUES (?, 0, '', '', '', '', NULL, CURRENT_TIMESTAMP)
+     ON CONFLICT(branch_id) DO UPDATE SET
+       linked = 0,
+       partner_id = '',
+       store_id = '',
+       api_key = '',
+       base_url = '',
+       updated_at = CURRENT_TIMESTAMP`,
+    [branchId]
+  );
+
+  const found = await findBaeminIntegrationByBranchId(branchId);
+  res.json({
+    success: true,
+    message: `${branch.name} 배민비즈 연동 해제 완료`,
+    data: formatBaeminBizIntegrationRow(found, branch.id, branch.name),
+  });
+}));
+
+app.post('/api/baemin-biz/sync', withErrorHandling(async (req, res) => {
+  const session = requireAdmin(req, res);
+  if (!session) {
+    return;
+  }
+
+  const branchId = await resolveBaeminTargetBranchId(session, req.body.branchId);
+  if (!branchId) {
+    sendError(res, 400, '지점을 선택해 주세요.');
+    return;
+  }
+
+  const branch = await get('SELECT id, name FROM branches WHERE id = ?', [branchId]);
+  if (!branch) {
+    sendError(res, 404, '지점을 찾을 수 없습니다.');
+    return;
+  }
+
+  if (!isSuperAdmin(session) && session.branch_id !== branchId) {
+    sendError(res, 403, '본인 지점만 동기화할 수 있습니다.');
+    return;
+  }
+
+  const found = await findBaeminIntegrationByBranchId(branchId);
+  if (!found || !found.linked) {
+    sendError(res, 400, '해당 지점은 배민비즈가 연동되어 있지 않습니다.');
+    return;
+  }
+
+  const syncPath = String(req.body.syncPath || '/v1/orders').trim();
+  const syncResult = await callBaeminConnectBizApi({
+    baseUrl: found.baseUrl,
+    syncPath,
+    apiKey: found.apiKey,
+    partnerId: found.partnerId,
+    storeId: found.storeId,
+  });
+
+  const nowIso = new Date().toISOString();
+  await run(
+    `UPDATE baemin_biz_integrations
+     SET last_sync_at = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE branch_id = ?`,
+    [nowIso, branchId]
+  );
+
+  res.json({
+    success: true,
+    message: `${branch.name} 배민비즈 동기화 완료`,
+    data: {
+      branchId,
+      syncedAt: nowIso,
+      importedOrders: syncResult.importedOrders || 0,
+      importedRiders: 0,
+      endpoint: syncPath,
+    },
+  });
+}));
+
 function getTodayDateKey(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -1572,6 +2361,28 @@ function calculateInstallmentAmount(totalAmount, totalDays, appliedDays) {
   const base = Math.floor(safeTotal / safeDays);
   const remainder = safeTotal % safeDays;
   return base + (safeApplied < remainder ? 1 : 0);
+}
+
+async function creditBranchAdmins(branchId, amount) {
+  if (!branchId || amount <= 0) {
+    return;
+  }
+
+  const admins = await all('SELECT id FROM admins WHERE branch_id = ? ORDER BY id', [branchId]);
+  if (admins.length === 0) {
+    return;
+  }
+
+  const share = Math.floor(amount / admins.length);
+  const remainder = amount % admins.length;
+
+  for (let index = 0; index < admins.length; index += 1) {
+    const bonus = index < remainder ? 1 : 0;
+    const credit = share + bonus;
+    if (credit > 0) {
+      await run('UPDATE admins SET balance = balance + ? WHERE id = ?', [credit, admins[index].id]);
+    }
+  }
 }
 
 async function runAutoDeductionCycle() {
@@ -1640,6 +2451,7 @@ async function runAutoDeductionCycle() {
       await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [amount, rule.riderId]);
       if (rule.branchId) {
         await run('UPDATE branches SET balance = balance + ? WHERE id = ?', [amount, rule.branchId]);
+        await creditBranchAdmins(rule.branchId, amount);
       }
       await run(
         `INSERT INTO deduction_logs

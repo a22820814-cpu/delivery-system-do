@@ -527,7 +527,10 @@
 
       <div id="admin-menu" class="dashboard-menu">
         <button type="button" class="menu-btn active" data-dashboard="admin" data-section="all">전체</button>
+        <button type="button" class="menu-btn" data-dashboard="admin" data-section="integration-hub">연동</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="system-profit">시스템 수익</button>
+        <button type="button" class="menu-btn" data-dashboard="admin" data-section="business-account">사업자 통장</button>
+        <button type="button" class="menu-btn" data-dashboard="admin" data-section="baemin-biz">배민비즈</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="auto-deduct">자동차감</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="branch-leaderboard">지점 리더보드</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="withdrawal-request">출금요청</button>
@@ -545,6 +548,69 @@
       <div class="card" id="system-profit-card" data-section="system-profit" hidden>
         <h2>시스템 수익 현황 (시스템 관리자 전용)</h2>
         <div class="stats" id="system-profit-stats"></div>
+      </div>
+
+      <div class="card" id="integration-hub-card" data-section="integration-hub">
+        <h2>연동 메뉴</h2>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+          <button type="button" id="go-business-account">사업자 통장 연동으로 이동</button>
+          <button type="button" id="go-baemin-biz">배민커넥트비즈 연동으로 이동</button>
+        </div>
+        <div id="integration-summary" style="color:#365255; font-size:13px;">연동 상태를 불러오는 중...</div>
+      </div>
+
+      <div class="card" id="business-account-card" data-section="business-account" hidden>
+        <h2>사업자 통장 연동 (시스템 관리자 전용)</h2>
+        <div class="stats" style="margin-bottom: 10px;">
+          <div class="stat-box">
+            <div class="stat-value" id="biz-linked-status">미연동</div>
+            <div class="stat-label">연동 상태</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value" id="biz-account-balance">0원</div>
+            <div class="stat-label">사업자 통장 적립금(수수료)</div>
+          </div>
+        </div>
+        <div id="biz-linked-info" style="margin-bottom:12px; color:#3a4f4f; font-size:13px;"></div>
+        <form id="business-account-form">
+          <input id="biz-bank-name" placeholder="은행명 (예: 기업은행)" required />
+          <input id="biz-account-number" placeholder="계좌번호" required />
+          <input id="biz-account-holder" placeholder="예금주" required />
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="submit">연동 저장</button>
+            <button type="button" id="biz-unlink-btn" style="background:#7b8d8f;">연동 해제</button>
+          </div>
+        </form>
+        <div id="business-account-msg" class="message"></div>
+      </div>
+
+      <div class="card" id="baemin-biz-card" data-section="baemin-biz" hidden>
+        <h2>배민비즈 연동 (지점별)</h2>
+        <div class="stats" style="margin-bottom: 10px;">
+          <div class="stat-box">
+            <div class="stat-value" id="baemin-link-status">미연동</div>
+            <div class="stat-label">연동 상태</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value" id="baemin-last-sync">-</div>
+            <div class="stat-label">최근 동기화</div>
+          </div>
+        </div>
+        <div id="baemin-linked-info" style="margin-bottom:12px; color:#3a4f4f; font-size:13px;">연동 정보가 없습니다.</div>
+        <form id="baemin-biz-form">
+          <select id="baemin-branch-select" style="display:none;"></select>
+          <input id="baemin-partner-id" placeholder="파트너 ID" required />
+          <input id="baemin-store-id" placeholder="스토어 ID" required />
+          <input id="baemin-base-url" placeholder="API 베이스 URL (예: https://api.partner.example.com)" required />
+          <input id="baemin-sync-path" placeholder="동기화 경로 (기본: /v1/orders)" value="/v1/orders" />
+          <input id="baemin-api-key" type="password" placeholder="API 키" required />
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="submit">연동 저장</button>
+            <button type="button" id="baemin-sync-btn" style="background:#1d5d60;">동기화 실행</button>
+            <button type="button" id="baemin-unlink-btn" style="background:#7b8d8f;">연동 해제</button>
+          </div>
+        </form>
+        <div id="baemin-biz-msg" class="message"></div>
       </div>
 
       <div class="card" data-section="notice-manage">
@@ -804,6 +870,7 @@
         <button type="button" class="menu-btn active" data-dashboard="rider" data-section="all">전체</button>
         <button type="button" class="menu-btn" data-dashboard="rider" data-section="withdraw-request">출금요청</button>
         <button type="button" class="menu-btn" data-dashboard="rider" data-section="auto-deduct-status">자동차감</button>
+        <button type="button" class="menu-btn" data-dashboard="rider" data-section="arrears-history">미수내역</button>
         <button type="button" class="menu-btn" data-dashboard="rider" data-section="withdraw-history">출금내역</button>
         <button type="button" class="menu-btn" data-dashboard="rider" data-section="delivery-history">배달내역</button>
       </div>
@@ -863,6 +930,10 @@
 
       <div class="card" data-section="auto-deduct-status">
         <h2>나의 자동차감 진행 현황</h2>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+          <button type="button" id="rider-auto-deduct-now-btn">지금 자동차감 실행</button>
+        </div>
+        <div id="rider-auto-deduct-now-msg" class="message"></div>
         <div id="rider-auto-deduct-empty" style="color:#5f6d6a;">설정된 자동차감이 없습니다.</div>
         <div id="rider-auto-deduct-status" class="auto-deduct-status-grid" hidden>
           <div class="auto-deduct-status-item">
@@ -898,6 +969,48 @@
             <strong id="rider-auto-description">-</strong>
           </div>
         </div>
+      </div>
+
+      <div class="card" data-section="arrears-history">
+        <h2>미수내역</h2>
+        <div class="stats" style="margin-bottom: 10px;">
+          <div class="stat-box">
+            <div class="stat-value" id="rider-arrears-today-missed">0원</div>
+            <div class="stat-label">오늘 미수금</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value" id="rider-arrears-total-missed">0원</div>
+            <div class="stat-label">누적 미수금</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value" id="rider-arrears-missed-days">0일</div>
+            <div class="stat-label">밀린 일수</div>
+          </div>
+        </div>
+        <div class="history-toolbar" data-view-key="rider-arrears">
+          <select class="history-mode" data-view-key="rider-arrears">
+            <option value="all">전체</option>
+            <option value="today">오늘</option>
+            <option value="before">오늘 이전</option>
+            <option value="date">날짜 선택</option>
+          </select>
+          <input type="date" class="history-date" data-view-key="rider-arrears" hidden />
+          <button type="button" class="history-page-btn history-prev" data-view-key="rider-arrears">이전</button>
+          <span class="history-page-info" id="rider-arrears-page-info">1 / 1</span>
+          <button type="button" class="history-page-btn history-next" data-view-key="rider-arrears">다음</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>날짜</th>
+              <th>예정 차감액</th>
+              <th>실제 차감액</th>
+              <th>미수 금액</th>
+              <th>오늘 차감 체크</th>
+            </tr>
+          </thead>
+          <tbody id="rider-arrears-tbody"></tbody>
+        </table>
       </div>
 
       <div class="card" data-section="policy">
@@ -990,6 +1103,9 @@
     let allAutoDeductRules = [];
     let allBranches = [];
     let allAdmins = [];
+    let riderArrears = { summary: null, rows: [] };
+    let currentBusinessAccount = null;
+    let currentBaeminBiz = null;
     let currentNotice = "";
     let selectedAdminForReset = null;
     const HISTORY_PAGE_SIZE = 7;
@@ -998,6 +1114,7 @@
       "admin-withdrawals": { mode: "all", date: "", page: 1, pageSize: HISTORY_PAGE_SIZE },
       "rider-deliveries": { mode: "all", date: "", page: 1, pageSize: HISTORY_PAGE_SIZE },
       "rider-withdrawals": { mode: "all", date: "", page: 1, pageSize: HISTORY_PAGE_SIZE },
+      "rider-arrears": { mode: "all", date: "", page: 1, pageSize: HISTORY_PAGE_SIZE },
     };
 
     function setMessage(elementId, text, isSuccess) {
@@ -1026,6 +1143,14 @@
 
     function formatKrw(value) {
       return `${formatNumber(value)}원`;
+    }
+
+    function maskAccountNumber(accountNumber) {
+      const value = String(accountNumber || "");
+      if (value.length <= 4) {
+        return value;
+      }
+      return `${"*".repeat(value.length - 4)}${value.slice(-4)}`;
     }
 
     function getTodayDateKeyLocal() {
@@ -1490,6 +1615,132 @@
       }
     }
 
+    function renderBusinessAccount() {
+      const statusEl = document.getElementById("biz-linked-status");
+      const balanceEl = document.getElementById("biz-account-balance");
+      const infoEl = document.getElementById("biz-linked-info");
+      const bankInput = document.getElementById("biz-bank-name");
+      const numberInput = document.getElementById("biz-account-number");
+      const holderInput = document.getElementById("biz-account-holder");
+
+      if (!statusEl || !balanceEl || !infoEl || !bankInput || !numberInput || !holderInput) {
+        return;
+      }
+
+      const account = currentBusinessAccount || {
+        linked: false,
+        bankName: "",
+        accountNumber: "",
+        accountHolder: "",
+        linkedAt: "",
+        balance: 0,
+      };
+
+      statusEl.textContent = account.linked ? "연동 완료" : "미연동";
+      balanceEl.textContent = formatKrw(account.balance || 0);
+
+      if (account.linked) {
+        infoEl.textContent = `${account.bankName} / ${maskAccountNumber(account.accountNumber)} / ${account.accountHolder} / 연동일 ${formatDateTime(account.linkedAt)}`;
+      } else {
+        infoEl.textContent = "연동된 사업자 통장이 없습니다.";
+      }
+
+      if (!bankInput.value) {
+        bankInput.value = account.bankName || "";
+      }
+      if (!numberInput.value) {
+        numberInput.value = account.accountNumber || "";
+      }
+      if (!holderInput.value) {
+        holderInput.value = account.accountHolder || "";
+      }
+    }
+
+    function renderBaeminBiz() {
+      const statusEl = document.getElementById("baemin-link-status");
+      const syncEl = document.getElementById("baemin-last-sync");
+      const infoEl = document.getElementById("baemin-linked-info");
+      const partnerInput = document.getElementById("baemin-partner-id");
+      const storeInput = document.getElementById("baemin-store-id");
+      const baseUrlInput = document.getElementById("baemin-base-url");
+
+      if (!statusEl || !syncEl || !infoEl || !partnerInput || !storeInput || !baseUrlInput) {
+        return;
+      }
+
+      const biz = currentBaeminBiz || {
+        linked: false,
+        partnerId: "",
+        storeId: "",
+        baseUrl: "",
+        apiKeyMasked: "",
+        linkedAt: "",
+        lastSyncAt: "",
+      };
+
+      statusEl.textContent = biz.linked ? "연동 완료" : "미연동";
+      syncEl.textContent = biz.lastSyncAt ? formatDateTime(biz.lastSyncAt) : "-";
+
+      if (biz.linked) {
+        infoEl.textContent = `파트너 ${biz.partnerId} / 스토어 ${biz.storeId} / API ${biz.apiKeyMasked || '-'} / URL ${biz.baseUrl || '-'} / 연동일 ${formatDateTime(biz.linkedAt)}`;
+      } else {
+        infoEl.textContent = "연동 정보가 없습니다.";
+      }
+
+      if (!partnerInput.value) {
+        partnerInput.value = biz.partnerId || "";
+      }
+      if (!storeInput.value) {
+        storeInput.value = biz.storeId || "";
+      }
+      if (!baseUrlInput.value) {
+        baseUrlInput.value = biz.baseUrl || "";
+      }
+    }
+
+    function renderIntegrationSummary() {
+      const element = document.getElementById("integration-summary");
+      if (!element) {
+        return;
+      }
+
+      const businessLinked = Boolean(currentBusinessAccount?.linked);
+      const baeminLinked = Boolean(currentBaeminBiz?.linked);
+      const baeminBranch = currentBaeminBiz?.branchName || (currentUser?.branch_id ? `지점ID ${currentUser.branch_id}` : "선택 지점");
+
+      const businessText = businessLinked ? "사업자 통장: 연동 완료" : "사업자 통장: 미연동";
+      const baeminText = baeminLinked ? `배민커넥트비즈(${baeminBranch}): 연동 완료` : `배민커넥트비즈(${baeminBranch}): 미연동`;
+      element.textContent = `${businessText} / ${baeminText}`;
+    }
+
+    function getSelectedBaeminBranchId() {
+      if (currentUser?.role !== "admin") {
+        return null;
+      }
+      if (currentUser?.branch_id) {
+        return Number(currentUser.branch_id) || null;
+      }
+      const branchSelect = document.getElementById("baemin-branch-select");
+      const selected = Number(branchSelect?.value || 0);
+      return selected > 0 ? selected : null;
+    }
+
+    async function loadBaeminBizStatus() {
+      if (currentUser?.role !== "admin") {
+        return;
+      }
+      const branchId = getSelectedBaeminBranchId();
+      if (!branchId) {
+        currentBaeminBiz = null;
+        renderBaeminBiz();
+        return;
+      }
+      const query = `?branchId=${branchId}`;
+      const data = await requestJson(`/api/baemin-biz${query}`);
+      currentBaeminBiz = data.data || null;
+      renderBaeminBiz();
+    }
+
     async function requestJson(url, options = {}) {
       const headers = {
         "Content-Type": "application/json",
@@ -1535,6 +1786,8 @@
         allChargeLogs = data.chargeLogs || [];
         allAutoDeductRules = data.autoDeductRules || [];
         allBranches = data.branches;
+        currentBusinessAccount = data.businessAccount || null;
+        currentBaeminBiz = data.baeminBiz || null;
         currentNotice = data.notice || "";
         
         // 라이더 선택 드롭다운 업데이트 (관리자용)
@@ -1559,12 +1812,29 @@
         const branchOptions = allBranches.map(b => `<option value="${b.id}">${b.name}</option>`).join("");
         const createRiderBranch = document.getElementById("create-rider-branch");
         const createAdminBranch = document.getElementById("admin-create-branch");
+        const baeminBranchSelect = document.getElementById("baemin-branch-select");
 
         if (createRiderBranch) {
           createRiderBranch.innerHTML = '<option value="">지점 선택</option>' + branchOptions;
         }
         if (createAdminBranch) {
           createAdminBranch.innerHTML = '<option value="">관리 지점 선택</option>' + branchOptions;
+        }
+        if (baeminBranchSelect) {
+          if (currentUser?.role === "admin" && !currentUser?.branch_id) {
+            baeminBranchSelect.style.display = "";
+            baeminBranchSelect.innerHTML = '<option value="">배민비즈 연동 지점 선택</option>' + branchOptions;
+            if (!baeminBranchSelect.value) {
+              baeminBranchSelect.value = allBranches[0]?.id ? String(allBranches[0].id) : "";
+            }
+          } else if (currentUser?.role === "admin" && currentUser?.branch_id) {
+            const ownBranch = allBranches.find((branch) => branch.id === currentUser.branch_id);
+            baeminBranchSelect.style.display = "none";
+            baeminBranchSelect.innerHTML = ownBranch
+              ? `<option value="${ownBranch.id}">${ownBranch.name}</option>`
+              : '<option value="">지점 없음</option>';
+            baeminBranchSelect.value = String(currentUser.branch_id);
+          }
         }
 
         const branchesList = document.getElementById("branches-list");
@@ -1575,11 +1845,22 @@
         }
 
         if (currentUser?.role === "admin") {
+          riderArrears = { summary: null, rows: [] };
           if (!currentUser?.branch_id) {
             await refreshAdminAccounts();
           }
+          await loadBaeminBizStatus();
           updateAdminDashboard();
         } else if (currentUser?.role === "rider") {
+          try {
+            const arrearsData = await requestJson('/api/riders/me/arrears');
+            riderArrears = {
+              summary: arrearsData?.data?.summary || null,
+              rows: arrearsData?.data?.rows || [],
+            };
+          } catch (arrearsError) {
+            riderArrears = { summary: null, rows: [] };
+          }
           updateRiderDashboard();
         }
         renderNotice();
@@ -1736,10 +2017,18 @@
       });
 
       const profitCard = document.getElementById("system-profit-card");
+      const businessCard = document.getElementById("business-account-card");
+      const baeminCard = document.getElementById("baemin-biz-card");
       const profitStats = document.getElementById("system-profit-stats");
       const showSystemProfit = isSystemAdminUser();
       if (profitCard) {
         profitCard.hidden = !showSystemProfit;
+      }
+      if (businessCard) {
+        businessCard.hidden = !showSystemProfit;
+      }
+      if (baeminCard) {
+        baeminCard.hidden = false;
       }
       if (profitStats && showSystemProfit) {
         const totalWithdrawalFee = allWithdrawals.reduce((sum, w) => sum + (Number(w.fee) || 0), 0);
@@ -1774,9 +2063,18 @@
       document.querySelectorAll('#admin-menu .menu-btn[data-section="system-profit"]').forEach((button) => {
         button.hidden = !isSystemAdminUser();
       });
+      document.querySelectorAll('#admin-menu .menu-btn[data-section="business-account"]').forEach((button) => {
+        button.hidden = !isSystemAdminUser();
+      });
+      document.querySelectorAll('#admin-menu .menu-btn[data-section="baemin-biz"]').forEach((button) => {
+        button.hidden = false;
+      });
 
       renderBranchLeaderboard();
       renderAutoDeductRules();
+      renderBusinessAccount();
+      renderBaeminBiz();
+      renderIntegrationSummary();
     }
 
     function updateRiderDashboard() {
@@ -1837,6 +2135,37 @@
             <td>${w.status}</td>
           </tr>
         `,
+      });
+
+      const arrearsSummary = riderArrears.summary || {
+        todayMissed: 0,
+        totalMissed: 0,
+        missedDays: 0,
+      };
+      document.getElementById("rider-arrears-today-missed").textContent = formatKrw(arrearsSummary.todayMissed || 0);
+      document.getElementById("rider-arrears-total-missed").textContent = formatKrw(arrearsSummary.totalMissed || 0);
+      document.getElementById("rider-arrears-missed-days").textContent = `${formatNumber(arrearsSummary.missedDays || 0)}일`;
+
+      renderHistoryTable({
+        viewKey: "rider-arrears",
+        items: riderArrears.rows || [],
+        createdAtField: "dateKey",
+        tbodyId: "rider-arrears-tbody",
+        emptyColspan: 5,
+        renderRow: (row) => {
+          const isOk = row.check === "O";
+          const mark = isOk ? "완료 O" : "X";
+          const color = isOk ? "#1d7a36" : "#c53b3b";
+          return `
+            <tr>
+              <td>${formatDateOnly(row.dateKey)}</td>
+              <td>${formatKrw(row.expectedAmount)}</td>
+              <td>${formatKrw(row.actualAmount)}</td>
+              <td>${formatKrw(row.shortfallAmount)}</td>
+              <td style="font-weight:700; color:${color};">${mark}</td>
+            </tr>
+          `;
+        },
       });
 
       renderRiderAutoDeductStatus();
@@ -2021,6 +2350,19 @@
     document.getElementById("auto-deduct-total-amount")?.addEventListener("input", updateAutoDeductPreview);
     document.getElementById("auto-deduct-total-days")?.addEventListener("input", updateAutoDeductPreview);
 
+    document.getElementById("rider-auto-deduct-now-btn")?.addEventListener("click", async () => {
+      try {
+        const data = await requestJson('/api/riders/me/auto-deduct-now', {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+        setMessage('rider-auto-deduct-now-msg', data.message || '자동차감 즉시 실행 완료', true);
+        await refreshData();
+      } catch (error) {
+        setMessage('rider-auto-deduct-now-msg', error.message, false);
+      }
+    });
+
     document.getElementById("rider-info-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const name = document.getElementById("rider-info-name").value;
@@ -2152,6 +2494,120 @@
         renderNotice();
       } catch (error) {
         setMessage("admin-notice-msg", error.message, false);
+      }
+    });
+
+    document.getElementById("business-account-form")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const bankName = document.getElementById("biz-bank-name").value.trim();
+      const accountNumber = document.getElementById("biz-account-number").value.trim();
+      const accountHolder = document.getElementById("biz-account-holder").value.trim();
+
+      try {
+        const data = await requestJson('/api/business-account/link', {
+          method: 'POST',
+          body: JSON.stringify({ bankName, accountNumber, accountHolder })
+        });
+        currentBusinessAccount = data.data || null;
+        setMessage('business-account-msg', data.message || '사업자 통장 연동 완료', true);
+        renderBusinessAccount();
+      } catch (error) {
+        setMessage('business-account-msg', error.message, false);
+      }
+    });
+
+    document.getElementById("biz-unlink-btn")?.addEventListener("click", async () => {
+      try {
+        const data = await requestJson('/api/business-account/unlink', {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+        currentBusinessAccount = data.data || null;
+        setMessage('business-account-msg', data.message || '연동 해제 완료', true);
+        renderBusinessAccount();
+      } catch (error) {
+        setMessage('business-account-msg', error.message, false);
+      }
+    });
+
+    document.getElementById("baemin-biz-form")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const branchId = getSelectedBaeminBranchId();
+      const partnerId = document.getElementById("baemin-partner-id").value.trim();
+      const storeId = document.getElementById("baemin-store-id").value.trim();
+      const baseUrl = document.getElementById("baemin-base-url").value.trim();
+      const apiKey = document.getElementById("baemin-api-key").value.trim();
+
+      if (!branchId) {
+        setMessage('baemin-biz-msg', '연동할 지점을 선택해 주세요.', false);
+        return;
+      }
+
+      try {
+        const data = await requestJson('/api/baemin-biz/link', {
+          method: 'POST',
+          body: JSON.stringify({ branchId, partnerId, storeId, baseUrl, apiKey })
+        });
+        currentBaeminBiz = data.data || null;
+        setMessage('baemin-biz-msg', data.message || '배민비즈 연동 저장 완료', true);
+        document.getElementById("baemin-api-key").value = "";
+        renderBaeminBiz();
+      } catch (error) {
+        setMessage('baemin-biz-msg', error.message, false);
+      }
+    });
+
+    document.getElementById("baemin-unlink-btn")?.addEventListener("click", async () => {
+      const branchId = getSelectedBaeminBranchId();
+      if (!branchId) {
+        setMessage('baemin-biz-msg', '해제할 지점을 선택해 주세요.', false);
+        return;
+      }
+      try {
+        const data = await requestJson('/api/baemin-biz/unlink', {
+          method: 'POST',
+          body: JSON.stringify({ branchId })
+        });
+        currentBaeminBiz = data.data || null;
+        setMessage('baemin-biz-msg', data.message || '배민비즈 연동 해제 완료', true);
+        renderBaeminBiz();
+      } catch (error) {
+        setMessage('baemin-biz-msg', error.message, false);
+      }
+    });
+
+    document.getElementById("baemin-sync-btn")?.addEventListener("click", async () => {
+      const branchId = getSelectedBaeminBranchId();
+      const syncPath = document.getElementById("baemin-sync-path")?.value?.trim() || "/v1/orders";
+      if (!branchId) {
+        setMessage('baemin-biz-msg', '동기화할 지점을 선택해 주세요.', false);
+        return;
+      }
+      try {
+        const data = await requestJson('/api/baemin-biz/sync', {
+          method: 'POST',
+          body: JSON.stringify({ branchId, syncPath })
+        });
+        setMessage('baemin-biz-msg', data.message || '동기화 완료', true);
+        await refreshData();
+      } catch (error) {
+        setMessage('baemin-biz-msg', error.message, false);
+      }
+    });
+
+    document.getElementById("go-business-account")?.addEventListener("click", () => {
+      applyDashboardSection("admin", "business-account");
+    });
+
+    document.getElementById("go-baemin-biz")?.addEventListener("click", () => {
+      applyDashboardSection("admin", "baemin-biz");
+    });
+
+    document.getElementById("baemin-branch-select")?.addEventListener("change", async () => {
+      try {
+        await loadBaeminBizStatus();
+      } catch (error) {
+        setMessage('baemin-biz-msg', error.message, false);
       }
     });
 
