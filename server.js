@@ -58,6 +58,14 @@ function all(sql, params = []) {
   });
 }
 
+async function addColumnIfMissing(tableName, columnName, definitionSql) {
+  const columns = await all(`PRAGMA table_info(${tableName})`);
+  const hasColumn = columns.some((column) => column.name === columnName);
+  if (!hasColumn) {
+    await run(`ALTER TABLE ${tableName} ADD COLUMN ${definitionSql}`);
+  }
+}
+
 async function transaction(work) {
   await run('BEGIN');
   try {
@@ -359,6 +367,8 @@ async function initializeDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       rider_id INTEGER NOT NULL,
       amount INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      processed_at TEXT,
       status TEXT NOT NULL,
       FOREIGN KEY (rider_id) REFERENCES riders(id)
     )
@@ -372,12 +382,20 @@ async function initializeDatabase() {
       days_count INTEGER,
       weekday TEXT,
       monthly_auto INTEGER NOT NULL DEFAULT 0,
+      daily_amount INTEGER,
+      total_days INTEGER,
       description TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       created_by_role TEXT NOT NULL DEFAULT 'sub_admin',
       FOREIGN KEY (rider_id) REFERENCES riders(id)
     )
   `);
+
+  await addColumnIfMissing('withdrawals', 'created_at', 'created_at TEXT');
+  await addColumnIfMissing('withdrawals', 'processed_at', 'processed_at TEXT');
+  await addColumnIfMissing('deduction_logs', 'daily_amount', 'daily_amount INTEGER');
+  await addColumnIfMissing('deduction_logs', 'total_days', 'total_days INTEGER');
+  await run('UPDATE withdrawals SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
 
   const seed = readSeedData();
   const branchCount = await get('SELECT COUNT(*) AS count FROM branches');
@@ -440,16 +458,24 @@ async function initializeDatabase() {
 
       for (const withdrawal of seed.withdrawals) {
         await run(
-          'INSERT INTO withdrawals (id, rider_id, amount, status) VALUES (?, ?, ?, ?)',
-          [withdrawal.id, withdrawal.riderId, withdrawal.amount, withdrawal.status]
+          `INSERT INTO withdrawals (id, rider_id, amount, status, created_at, processed_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            withdrawal.id,
+            withdrawal.riderId,
+            withdrawal.amount,
+            withdrawal.status,
+            withdrawal.createdAt || new Date().toISOString(),
+            withdrawal.processedAt || null,
+          ]
         );
       }
 
       for (const deduction of seed.deductionLogs || []) {
         await run(
           `INSERT INTO deduction_logs
-           (id, rider_id, amount, days_count, weekday, monthly_auto, description, created_at, created_by_role)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, rider_id, amount, days_count, weekday, monthly_auto, daily_amount, total_days, description, created_at, created_by_role)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             deduction.id,
             deduction.riderId,
@@ -457,6 +483,8 @@ async function initializeDatabase() {
             deduction.daysCount || null,
             deduction.weekday || '',
             deduction.monthlyAuto ? 1 : 0,
+            deduction.dailyAmount || null,
+            deduction.totalDays || null,
             deduction.description || '',
             deduction.createdAt || new Date().toISOString(),
             deduction.createdByRole || 'sub_admin',
@@ -484,10 +512,17 @@ async function readState() {
     all('SELECT id, username, name, balance, bank, account, branch_id FROM riders ORDER BY id'),
     all('SELECT id, username, company_name, branch_id FROM sub_admins ORDER BY id'),
     all('SELECT id, rider_id AS riderId, fare, fee100, fee16, final, status FROM deliveries ORDER BY id'),
-    all('SELECT id, rider_id AS riderId, amount, status FROM withdrawals ORDER BY id'),
+    all(
+      `SELECT id, rider_id AS riderId, amount, status,
+              created_at AS createdAt, processed_at AS processedAt
+       FROM withdrawals
+       ORDER BY id`
+    ),
     all(
       `SELECT id, rider_id AS riderId, amount, days_count AS daysCount, weekday,
-              monthly_auto AS monthlyAuto, description, created_at AS createdAt, created_by_role AS createdByRole
+              monthly_auto AS monthlyAuto, daily_amount AS dailyAmount,
+              total_days AS totalDays, description,
+              created_at AS createdAt, created_by_role AS createdByRole
        FROM deduction_logs
        ORDER BY id DESC`
     ),
@@ -875,13 +910,34 @@ app.post('/api/riders/:riderId/deduct', withErrorHandling(async (req, res) => {
     return;
   }
   const riderId = Number(req.params.riderId);
-  const amount = Number(req.body.amount);
+  let amount = Number(req.body.amount);
+  const dailyAmountRaw = req.body.dailyAmount;
+  const dailyAmount = dailyAmountRaw === '' || dailyAmountRaw == null
+    ? null
+    : Number(dailyAmountRaw);
+  const totalDaysRaw = req.body.totalDays;
+  const totalDays = totalDaysRaw === '' || totalDaysRaw == null
+    ? null
+    : Number(totalDaysRaw);
   const daysCount = req.body.daysCount === '' || req.body.daysCount == null
     ? null
     : Number(req.body.daysCount);
   const weekday = String(req.body.weekday || '').trim();
   const monthlyAuto = Boolean(req.body.monthlyAuto);
   const description = String(req.body.description || '').trim();
+
+  const effectiveTotalDays = totalDays == null ? 100 : totalDays;
+  if (dailyAmount != null) {
+    if (!Number.isFinite(dailyAmount) || dailyAmount <= 0) {
+      sendError(res, 400, '하루 차감액은 1원 이상이어야 합니다.');
+      return;
+    }
+    if (!Number.isInteger(effectiveTotalDays) || effectiveTotalDays <= 0) {
+      sendError(res, 400, '총 일수는 1일 이상 정수여야 합니다.');
+      return;
+    }
+    amount = dailyAmount * effectiveTotalDays;
+  }
 
   if (!riderId || !Number.isFinite(amount) || amount <= 0) {
     sendError(res, 400, '차감 정보가 올바르지 않습니다.');
@@ -923,9 +979,19 @@ app.post('/api/riders/:riderId/deduct', withErrorHandling(async (req, res) => {
     await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [amount, riderId]);
     await run(
       `INSERT INTO deduction_logs
-       (rider_id, amount, days_count, weekday, monthly_auto, description, created_by_role)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [riderId, amount, daysCount, weekday, monthlyAuto ? 1 : 0, description, session.role]
+       (rider_id, amount, days_count, weekday, monthly_auto, daily_amount, total_days, description, created_by_role)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        riderId,
+        amount,
+        daysCount != null ? daysCount : effectiveTotalDays,
+        weekday,
+        monthlyAuto ? 1 : 0,
+        dailyAmount,
+        dailyAmount == null ? null : effectiveTotalDays,
+        description,
+        session.role,
+      ]
     );
   });
   const updatedRider = await get(
@@ -939,6 +1005,8 @@ app.post('/api/riders/:riderId/deduct', withErrorHandling(async (req, res) => {
     deduction: {
       riderId,
       amount,
+      dailyAmount,
+      totalDays: dailyAmount == null ? null : effectiveTotalDays,
       daysCount,
       weekday,
       monthlyAuto,
@@ -1078,10 +1146,17 @@ app.post('/api/withdrawals', withErrorHandling(async (req, res) => {
      VALUES (?, ?, 'pending')`,
     [riderId, amount]
   );
+  const createdWithdrawal = await get(
+    `SELECT id, rider_id AS riderId, amount, status,
+            created_at AS createdAt, processed_at AS processedAt
+     FROM withdrawals
+     WHERE id = ?`,
+    [result.lastID]
+  );
   res.json({
     success: true,
     message: '출금신청 완료 (관리자 승인 대기 중)',
-    withdrawal: { id: result.lastID, riderId, amount, status: 'pending' },
+    withdrawal: createdWithdrawal,
   });
 }));
 
@@ -1127,8 +1202,16 @@ app.post('/api/withdrawals/:withdrawalId/approve', withErrorHandling(async (req,
 
   await transaction(async () => {
     await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [withdrawal.amount, withdrawal.riderId]);
-    await run(`UPDATE withdrawals SET status = 'approved' WHERE id = ?`, [withdrawalId]);
+    await run(`UPDATE withdrawals SET status = 'approved', processed_at = CURRENT_TIMESTAMP WHERE id = ?`, [withdrawalId]);
   });
+
+  const updatedWithdrawal = await get(
+    `SELECT id, rider_id AS riderId, amount, status,
+            created_at AS createdAt, processed_at AS processedAt
+     FROM withdrawals
+     WHERE id = ?`,
+    [withdrawalId]
+  );
 
   const updatedRider = await get(
     'SELECT id, username, name, balance, bank, account, branch_id FROM riders WHERE id = ?',
@@ -1137,7 +1220,7 @@ app.post('/api/withdrawals/:withdrawalId/approve', withErrorHandling(async (req,
   res.json({
     success: true,
     message: '출금 승인 완료',
-    withdrawal: { ...withdrawal, status: 'approved' },
+    withdrawal: updatedWithdrawal,
     rider: updatedRider,
   });
 }));
