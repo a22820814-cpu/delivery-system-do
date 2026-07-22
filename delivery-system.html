@@ -529,11 +529,17 @@
         <button type="button" class="menu-btn active" data-dashboard="admin" data-section="all">전체</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="system-profit">시스템 수익</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="auto-deduct">자동차감</button>
+        <button type="button" class="menu-btn" data-dashboard="admin" data-section="branch-leaderboard">지점 리더보드</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="withdrawal-request">출금요청</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="recent-deliveries">최근 배달</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="charge">잔액 충전</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="delivery-add">배달 추가</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="rider-status">라이더 현황</button>
+      </div>
+
+      <div class="card" data-section="branch-leaderboard">
+        <h2>지점별 랭킹 리더보드</h2>
+        <div id="branch-leaderboard-wrap">리더보드 데이터를 불러오는 중...</div>
       </div>
 
       <div class="card" id="system-profit-card" data-section="system-profit" hidden>
@@ -1369,6 +1375,74 @@
       gridEl.hidden = false;
     }
 
+    function renderBranchLeaderboard() {
+      const wrap = document.getElementById("branch-leaderboard-wrap");
+      if (!wrap) {
+        return;
+      }
+
+      const branchRows = allBranches.map((branch) => {
+        const ridersInBranch = allRiders.filter((rider) => rider.branch_id === branch.id);
+        const ranked = ridersInBranch.map((rider) => {
+          const riderDeliveries = allDeliveries.filter((delivery) => delivery.riderId === rider.id);
+          const totalSettlement = riderDeliveries.reduce((sum, delivery) => sum + (Number(delivery.final) || 0), 0);
+          return {
+            rider,
+            totalSettlement,
+            deliveryCount: riderDeliveries.length,
+            balance: Number(rider.balance) || 0,
+          };
+        }).sort((a, b) => {
+          if (b.totalSettlement !== a.totalSettlement) {
+            return b.totalSettlement - a.totalSettlement;
+          }
+          if (b.deliveryCount !== a.deliveryCount) {
+            return b.deliveryCount - a.deliveryCount;
+          }
+          return a.rider.name.localeCompare(b.rider.name, "ko-KR");
+        });
+
+        if (ranked.length === 0) {
+          return `
+            <div class="card" style="margin-top: 12px;">
+              <h3 style="margin:0 0 8px;">${branch.name}</h3>
+              <div style="color:#5f6d6a; font-size:13px;">해당 지점에 등록된 기사가 없습니다.</div>
+            </div>
+          `;
+        }
+
+        const rows = ranked.map((entry, index) => `
+          <tr>
+            <td>${index + 1}</td>
+            <td>${entry.rider.name}</td>
+            <td>${formatKrw(entry.totalSettlement)}</td>
+            <td>${formatNumber(entry.deliveryCount)}건</td>
+            <td>${formatKrw(entry.balance)}</td>
+          </tr>
+        `).join("");
+
+        return `
+          <div class="card" style="margin-top: 12px;">
+            <h3 style="margin:0 0 8px;">${branch.name}</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>순위</th>
+                  <th>기사</th>
+                  <th>누적 정산액</th>
+                  <th>배달건수</th>
+                  <th>현재 잔액</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      });
+
+      wrap.innerHTML = branchRows.join("") || '<div style="color:#5f6d6a;">지점 정보가 없습니다.</div>';
+    }
+
     function applyDashboardSection(dashboardType, section) {
       const dashboardId = dashboardType === "admin" ? "admin-dashboard" : "rider-dashboard";
       const dashboard = document.getElementById(dashboardId);
@@ -1701,6 +1775,7 @@
         button.hidden = !isSystemAdminUser();
       });
 
+      renderBranchLeaderboard();
       renderAutoDeductRules();
     }
 
