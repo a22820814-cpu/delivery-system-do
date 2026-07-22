@@ -15,6 +15,7 @@ const APP_HTML_PATH = path.join(__dirname, 'delivery-system.html');
 const PASSWORD_HASH_PREFIX = 'scrypt';
 const DEFAULT_ADMIN_USERNAME = 'admin';
 const DEFAULT_ADMIN_PASSWORD = '1234';
+const WITHDRAWAL_FEE = 300;
 const sessions = new Map();
 
 const db = new sqlite3.Database(SQLITE_PATH);
@@ -405,12 +406,14 @@ async function initializeDatabase() {
 
   await addColumnIfMissing('withdrawals', 'created_at', 'created_at TEXT');
   await addColumnIfMissing('withdrawals', 'processed_at', 'processed_at TEXT');
+  await addColumnIfMissing('withdrawals', 'fee', 'fee INTEGER');
   await addColumnIfMissing('deliveries', 'created_at', 'created_at TEXT');
   await addColumnIfMissing('deduction_logs', 'daily_amount', 'daily_amount INTEGER');
   await addColumnIfMissing('deduction_logs', 'total_days', 'total_days INTEGER');
   await addColumnIfMissing('admins', 'branch_id', 'branch_id INTEGER');
   await run('UPDATE deliveries SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE withdrawals SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
+  await run('UPDATE withdrawals SET fee = COALESCE(fee, 0)');
   await run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('global_notice', '')");
 
   const seed = readSeedData();
@@ -470,12 +473,13 @@ async function initializeDatabase() {
 
       for (const withdrawal of seed.withdrawals) {
         await run(
-          `INSERT INTO withdrawals (id, rider_id, amount, status, created_at, processed_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO withdrawals (id, rider_id, amount, fee, status, created_at, processed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [
             withdrawal.id,
             withdrawal.riderId,
             withdrawal.amount,
+            withdrawal.fee || 0,
             withdrawal.status,
             withdrawal.createdAt || new Date().toISOString(),
             withdrawal.processedAt || null,
@@ -529,7 +533,7 @@ async function readState() {
        ORDER BY id`
     ),
     all(
-      `SELECT id, rider_id AS riderId, amount, status,
+      `SELECT id, rider_id AS riderId, amount, fee, status,
               created_at AS createdAt, processed_at AS processedAt
        FROM withdrawals
        ORDER BY id`
@@ -1106,6 +1110,8 @@ app.post('/api/withdrawals', withErrorHandling(async (req, res) => {
   }
   const riderId = Number(req.body.riderId);
   const amount = Number(req.body.amount);
+  const fee = WITHDRAWAL_FEE;
+  const totalDeduction = amount + fee;
 
   if (!riderId || !Number.isFinite(amount) || amount <= 0) {
     sendError(res, 400, '출금 금액이 올바르지 않습니다.');
@@ -1128,22 +1134,22 @@ app.post('/api/withdrawals', withErrorHandling(async (req, res) => {
     return;
   }
 
-  if (rider.balance < amount) {
-    sendError(res, 400, '잔액이 부족합니다.');
+  if (rider.balance < totalDeduction) {
+    sendError(res, 400, `잔액이 부족합니다. (출금액 ${amount}원 + 출금수수료 ${fee}원)`);
     return;
   }
 
   const result = await transaction(async () => {
-    await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [amount, riderId]);
+    await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [totalDeduction, riderId]);
     const insertResult = await run(
-      `INSERT INTO withdrawals (rider_id, amount, status, processed_at)
-       VALUES (?, ?, 'approved', CURRENT_TIMESTAMP)`,
-      [riderId, amount]
+      `INSERT INTO withdrawals (rider_id, amount, fee, status, processed_at)
+       VALUES (?, ?, ?, 'approved', CURRENT_TIMESTAMP)`,
+      [riderId, amount, fee]
     );
     return insertResult;
   });
   const createdWithdrawal = await get(
-    `SELECT id, rider_id AS riderId, amount, status,
+    `SELECT id, rider_id AS riderId, amount, fee, status,
             created_at AS createdAt, processed_at AS processedAt
      FROM withdrawals
      WHERE id = ?`,
@@ -1163,7 +1169,7 @@ app.post('/api/withdrawals/:withdrawalId/approve', withErrorHandling(async (req,
   }
   const withdrawalId = Number(req.params.withdrawalId);
   const withdrawal = await get(
-    'SELECT id, rider_id AS riderId, amount, status FROM withdrawals WHERE id = ?',
+    'SELECT id, rider_id AS riderId, amount, fee, status FROM withdrawals WHERE id = ?',
     [withdrawalId]
   );
 
@@ -1193,18 +1199,21 @@ app.post('/api/withdrawals/:withdrawalId/approve', withErrorHandling(async (req,
     return;
   }
 
-  if (rider.balance < withdrawal.amount) {
+  const withdrawalFee = Number(withdrawal.fee) || 0;
+  const totalDeduction = withdrawal.amount + withdrawalFee;
+
+  if (rider.balance < totalDeduction) {
     sendError(res, 400, '잔액 부족으로 승인할 수 없습니다.');
     return;
   }
 
   await transaction(async () => {
-    await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [withdrawal.amount, withdrawal.riderId]);
+    await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [totalDeduction, withdrawal.riderId]);
     await run(`UPDATE withdrawals SET status = 'approved', processed_at = CURRENT_TIMESTAMP WHERE id = ?`, [withdrawalId]);
   });
 
   const updatedWithdrawal = await get(
-    `SELECT id, rider_id AS riderId, amount, status,
+    `SELECT id, rider_id AS riderId, amount, fee, status,
             created_at AS createdAt, processed_at AS processedAt
      FROM withdrawals
      WHERE id = ?`,
