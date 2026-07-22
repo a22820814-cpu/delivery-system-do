@@ -427,11 +427,17 @@
 
       <div id="admin-menu" class="dashboard-menu">
         <button type="button" class="menu-btn active" data-dashboard="admin" data-section="all">전체</button>
+        <button type="button" class="menu-btn" data-dashboard="admin" data-section="system-profit">시스템 수익</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="withdrawal-request">출금요청</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="recent-deliveries">최근 배달</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="charge">잔액 충전</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="delivery-add">배달 추가</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="rider-status">라이더 현황</button>
+      </div>
+
+      <div class="card" id="system-profit-card" data-section="system-profit" hidden>
+        <h2>시스템 수익 현황 (시스템 관리자 전용)</h2>
+        <div class="stats" id="system-profit-stats"></div>
       </div>
 
       <div class="card" data-section="notice-manage">
@@ -602,6 +608,7 @@
         <p>원천세(3.3%): 배달 요금의 3.3%</p>
         <p>고용보험: 배달 1건당 100원</p>
         <p>산재보험: 현재 0원(미적용)</p>
+        <p>입금수수료: 충전 1회당 300원</p>
         <p>출금수수료: 출금 1회당 300원</p>
       </div>
     </div>
@@ -725,6 +732,7 @@
     let allDeliveries = [];
     let allWithdrawals = [];
     let allDeductionLogs = [];
+    let allChargeLogs = [];
     let allBranches = [];
     let allAdmins = [];
     let currentNotice = "";
@@ -756,6 +764,12 @@
 
     function formatKrw(value) {
       return `${formatNumber(value)}원`;
+    }
+
+    function isSystemAdminUser() {
+      return currentUser?.role === "admin"
+        && !currentUser?.branch_id
+        && (currentUser?.admin_id === 1 || currentUser?.username === "admin");
     }
 
     function extractDigits(value) {
@@ -884,6 +898,7 @@
         allDeliveries = data.deliveries;
         allWithdrawals = data.withdrawals;
         allDeductionLogs = data.deductionLogs || [];
+        allChargeLogs = data.chargeLogs || [];
         allBranches = data.branches;
         currentNotice = data.notice || "";
         
@@ -1054,6 +1069,32 @@
         `;
       }).join("");
 
+      const profitCard = document.getElementById("system-profit-card");
+      const profitStats = document.getElementById("system-profit-stats");
+      const showSystemProfit = isSystemAdminUser();
+      if (profitCard) {
+        profitCard.hidden = !showSystemProfit;
+      }
+      if (profitStats && showSystemProfit) {
+        const totalWithdrawalFee = allWithdrawals.reduce((sum, w) => sum + (Number(w.fee) || 0), 0);
+        const totalChargeFee = allChargeLogs.reduce((sum, c) => sum + (Number(c.fee) || 0), 0);
+        const totalProfit = totalWithdrawalFee + totalChargeFee;
+        profitStats.innerHTML = `
+          <div class="stat-box">
+            <div class="stat-value">${formatKrw(totalChargeFee)}</div>
+            <div class="stat-label">입금 수수료 수익</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value">${formatKrw(totalWithdrawalFee)}</div>
+            <div class="stat-label">출금 수수료 수익</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value">${formatKrw(totalProfit)}</div>
+            <div class="stat-label">총 수수료 수익</div>
+          </div>
+        `;
+      }
+
       const branchManageEnabled = !currentUser?.branch_id;
       const branchPanel = document.getElementById("create-branch-form")?.closest(".card");
       const adminPanel = document.getElementById("create-admin-form")?.closest(".card");
@@ -1063,6 +1104,10 @@
       if (adminPanel) {
         adminPanel.hidden = !branchManageEnabled;
       }
+
+      document.querySelectorAll('#admin-menu .menu-btn[data-section="system-profit"]').forEach((button) => {
+        button.hidden = !isSystemAdminUser();
+      });
     }
 
     function updateRiderDashboard() {
