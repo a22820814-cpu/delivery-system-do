@@ -127,6 +127,40 @@
       box-shadow: 0 0 0 3px rgba(14, 138, 116, 0.16);
     }
 
+    .money-input {
+      display: flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.94);
+      overflow: hidden;
+    }
+
+    .money-input input {
+      border: none;
+      box-shadow: none;
+      border-radius: 0;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .money-input input:focus {
+      box-shadow: none;
+    }
+
+    .money-unit {
+      padding: 0 12px;
+      color: #3a5d5d;
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+      border-left: 1px solid var(--line);
+      background: #f4fbf7;
+      height: 100%;
+      display: flex;
+      align-items: center;
+    }
+
     button {
       border: none;
       background: linear-gradient(135deg, #0e8a74, #146c87);
@@ -257,6 +291,56 @@
       box-shadow: 0 8px 16px rgba(20, 108, 135, 0.26);
     }
 
+    .prelogin-showcase {
+      position: relative;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 8% 10%, rgba(255, 179, 71, 0.24), rgba(255, 179, 71, 0) 30%),
+        radial-gradient(circle at 92% 90%, rgba(14, 138, 116, 0.2), rgba(14, 138, 116, 0) 34%),
+        linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(239, 251, 246, 0.88));
+    }
+
+    .prelogin-showcase h2 {
+      margin-bottom: 6px;
+    }
+
+    .prelogin-showcase p {
+      margin: 6px 0;
+      color: #3d5654;
+    }
+
+    .showcase-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      margin-top: 14px;
+    }
+
+    .showcase-chip {
+      border: 1px solid rgba(20, 108, 135, 0.2);
+      border-radius: 14px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.8);
+    }
+
+    .showcase-chip strong {
+      display: block;
+      margin-bottom: 5px;
+      color: #0f4f53;
+      font-size: 14px;
+    }
+
+    .showcase-guide {
+      margin-top: 14px;
+      padding: 12px;
+      border-radius: 12px;
+      background: rgba(14, 138, 116, 0.09);
+      border: 1px dashed rgba(14, 138, 116, 0.35);
+      color: #235257;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
     @keyframes lift-in {
       from { opacity: 0; transform: translateY(10px); }
       to { opacity: 1; transform: translateY(0); }
@@ -279,6 +363,34 @@
       <div class="role-selector">
         <button class="role-btn" onclick="selectRole('admin')">관리자 로그인</button>
         <button class="role-btn" onclick="selectRole('rider')">기사 로그인</button>
+      </div>
+    </div>
+
+    <div id="prelogin-showcase" class="card prelogin-showcase">
+      <h2>오늘 정산, 더 빠르고 정확하게</h2>
+      <p>출금, 배달, 잔액, 공지를 한 화면에서 관리하고 지점별로 안전하게 운영하세요.</p>
+
+      <div class="showcase-grid">
+        <div class="showcase-chip">
+          <strong>지점별 권한 분리</strong>
+          <span>관리자는 자기 지점 기사 정보와 정산만 처리합니다.</span>
+        </div>
+        <div class="showcase-chip">
+          <strong>실시간 거래내역</strong>
+          <span>모든 거래를 년/월/일 시각으로 확인할 수 있습니다.</span>
+        </div>
+        <div class="showcase-chip">
+          <strong>투명한 수수료 안내</strong>
+          <span>원천세, 고용보험, 산재보험, 출금수수료를 항목별로 표시합니다.</span>
+        </div>
+        <div class="showcase-chip">
+          <strong>원화 기준 출금</strong>
+          <span>출금 입력 시 KRW 원 표기와 수수료를 함께 안내합니다.</span>
+        </div>
+      </div>
+
+      <div class="showcase-guide">
+        빠른 시작: 상단에서 관리자 또는 기사 로그인을 선택한 뒤, 메뉴에서 출금요청/출금내역/배달내역을 눌러 필요한 화면으로 바로 이동하세요.
       </div>
     </div>
 
@@ -414,7 +526,7 @@
           <select id="charge-rider" required>
             <option value="">라이더 선택</option>
           </select>
-          <input id="charge-amount" type="number" placeholder="충전액" required />
+          <input id="charge-amount" type="text" inputmode="numeric" placeholder="충전액" required />
           <button type="submit">충전</button>
         </form>
         <div id="charge-msg" class="message"></div>
@@ -426,7 +538,7 @@
           <select id="delivery-rider" required>
             <option value="">라이더 선택</option>
           </select>
-          <input id="delivery-fare" type="number" placeholder="요금" required />
+          <input id="delivery-fare" type="text" inputmode="numeric" placeholder="요금" required />
           <button type="submit">배달 추가</button>
         </form>
       </div>
@@ -473,6 +585,8 @@
               <th>번호</th>
               <th>라이더</th>
               <th>출금액</th>
+              <th>출금수수료</th>
+              <th>총차감액</th>
               <th>신청일시</th>
               <th>처리일시</th>
               <th>상태</th>
@@ -481,6 +595,14 @@
           </thead>
           <tbody id="withdrawals-tbody"></tbody>
         </table>
+      </div>
+
+      <div class="card" data-section="policy">
+        <h2>정산/출금 항목 안내</h2>
+        <p>원천세(3.3%): 배달 요금의 3.3%</p>
+        <p>고용보험: 배달 1건당 100원</p>
+        <p>산재보험: 현재 0원(미적용)</p>
+        <p>출금수수료: 출금 1회당 300원</p>
       </div>
     </div>
 
@@ -531,10 +653,22 @@
       <div class="card" data-section="withdraw-request">
         <h2>출금 요청</h2>
         <form id="rider-withdraw-form">
-          <input id="rider-withdraw-amount" type="number" placeholder="출금액" required />
+          <div class="money-input">
+            <input id="rider-withdraw-amount" type="text" inputmode="numeric" placeholder="출금액" required />
+            <span class="money-unit">KRW 원</span>
+          </div>
           <button type="submit">출금 요청</button>
         </form>
+        <p style="margin-top: 12px; color: #5f6d6a;">출금수수료 300원이 별도 차감됩니다.</p>
         <div id="rider-withdraw-msg" class="message"></div>
+      </div>
+
+      <div class="card" data-section="policy">
+        <h2>정산/출금 항목 안내</h2>
+        <p>원천세(3.3%): 배달 요금의 3.3%</p>
+        <p>고용보험: 배달 1건당 100원</p>
+        <p>산재보험: 현재 0원(미적용)</p>
+        <p>출금수수료: 출금 1회당 300원</p>
       </div>
 
       <div class="card" data-section="password">
@@ -571,6 +705,8 @@
             <tr>
               <th>번호</th>
               <th>출금액</th>
+              <th>출금수수료</th>
+              <th>총차감액</th>
               <th>신청일시</th>
               <th>처리일시</th>
               <th>상태</th>
@@ -604,7 +740,59 @@
       if (!value) return "-";
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return String(value);
-      return date.toLocaleString("ko-KR", { hour12: false });
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      const hour = String(date.getHours()).padStart(2, "0");
+      const minute = String(date.getMinutes()).padStart(2, "0");
+      const second = String(date.getSeconds()).padStart(2, "0");
+      return `${year}년 ${month}월 ${day}일 ${hour}:${minute}:${second}`;
+    }
+
+    function formatNumber(value) {
+      const numberValue = Number(value) || 0;
+      return numberValue.toLocaleString("ko-KR");
+    }
+
+    function formatKrw(value) {
+      return `${formatNumber(value)}원`;
+    }
+
+    function extractDigits(value) {
+      return String(value || "").replace(/[^\d]/g, "");
+    }
+
+    function formatMoneyInputValue(value) {
+      const digits = extractDigits(value);
+      if (!digits) return "";
+      return Number(digits).toLocaleString("ko-KR");
+    }
+
+    function parseMoneyInputValue(inputId) {
+      const input = document.getElementById(inputId);
+      const digits = extractDigits(input?.value || "");
+      return Number(digits || 0);
+    }
+
+    function setupMoneyInput(inputId) {
+      const input = document.getElementById(inputId);
+      if (!input) {
+        return;
+      }
+
+      input.addEventListener("input", () => {
+        input.value = formatMoneyInputValue(input.value);
+      });
+
+      input.addEventListener("blur", () => {
+        input.value = formatMoneyInputValue(input.value);
+      });
+    }
+
+    function setupMoneyInputs() {
+      setupMoneyInput("charge-amount");
+      setupMoneyInput("delivery-fare");
+      setupMoneyInput("rider-withdraw-amount");
     }
 
     function applyDashboardSection(dashboardType, section) {
@@ -677,6 +865,7 @@
       document.getElementById("role-selection").hidden = role !== null;
       document.getElementById("admin-login").hidden = role !== "admin";
       document.getElementById("rider-login").hidden = role !== "rider";
+      document.getElementById("prelogin-showcase").hidden = role !== null;
       if (role === null) {
         currentUser = null;
       }
@@ -813,7 +1002,7 @@
     function updateAdminDashboard() {
       const statsHtml = allRiders.map(r => `
         <div class="stat-box">
-          <div class="stat-value">${r.balance}원</div>
+          <div class="stat-value">${formatKrw(r.balance)}</div>
           <div class="stat-label">${r.name}</div>
         </div>
       `).join("");
@@ -822,7 +1011,7 @@
       document.getElementById("riders-tbody").innerHTML = allRiders.map(r => `
         <tr>
           <td>${r.name}</td>
-          <td>${r.balance}원</td>
+          <td>${formatKrw(r.balance)}</td>
           <td>${allDeliveries.filter(d => d.riderId === r.id).length}</td>
           <td>${allWithdrawals.filter(w => w.riderId === r.id).length}</td>
         </tr>
@@ -837,10 +1026,10 @@
             <td>${d.id}</td>
             <td>${rider?.name || "불명"}</td>
             <td>${formatDateTime(d.createdAt)}</td>
-            <td>${d.fare}원</td>
-            <td>${d.fee100}원</td>
-            <td>${d.fee16}원</td>
-            <td>${d.final}원 <span style="color: ${statusColor}; font-weight: bold; font-size: 0.9em;">(${statusText})</span></td>
+            <td>${formatKrw(d.fare)}</td>
+            <td>${formatKrw(d.fee100)}</td>
+            <td>${formatKrw(d.fee16)}</td>
+            <td>${formatKrw(d.final)} <span style="color: ${statusColor}; font-weight: bold; font-size: 0.9em;">(${statusText})</span></td>
           </tr>
         `;
       }).join("");
@@ -849,11 +1038,14 @@
         const rider = allRiders.find(r => r.id === w.riderId);
         const statusColor = w.status === "pending" ? "#ff9800" : (w.status === "approved" ? "#28a745" : "#dc3545");
         const statusText = w.status === "pending" ? "대기 중" : (w.status === "approved" ? "승인" : "거부");
+        const fee = Number(w.fee) || 0;
         return `
           <tr>
             <td>${w.id}</td>
             <td>${rider?.name || "불명"}</td>
-            <td>${w.amount}원</td>
+            <td>${formatKrw(w.amount)}</td>
+            <td>${formatKrw(fee)}</td>
+            <td>${formatKrw(w.amount + fee)}</td>
             <td>${formatDateTime(w.createdAt)}</td>
             <td>${formatDateTime(w.processedAt)}</td>
             <td style="color: ${statusColor}; font-weight: bold;">${statusText}</td>
@@ -880,7 +1072,7 @@
       const myWithdrawals = allWithdrawals.filter(w => w.riderId === riderId);
 
       document.getElementById("rider-name").textContent = rider?.name || "기사";
-      document.getElementById("rider-balance").textContent = (rider?.balance || 0) + "원";
+      document.getElementById("rider-balance").textContent = formatKrw(rider?.balance || 0);
       document.getElementById("rider-delivery-count").textContent = myDeliveries.length;
       document.getElementById("rider-withdrawal-count").textContent = myWithdrawals.length;
 
@@ -895,9 +1087,9 @@
         <tr>
           <td>${d.id}</td>
           <td>${formatDateTime(d.createdAt)}</td>
-          <td>${d.fare}원</td>
-          <td>${d.fee100 + d.fee16}원</td>
-          <td>${d.final}원</td>
+          <td>${formatKrw(d.fare)}</td>
+          <td>${formatKrw(d.fee100 + d.fee16)}</td>
+          <td>${formatKrw(d.final)}</td>
           <td>${d.status === 'completed' ? '✅ 정산완료' : `<button onclick="completeDelivery(${d.id})" style="background: #28a745; color: white; padding: 5px 10px; border: none; border-radius: 3px; cursor: pointer;">배달완료</button>`}</td>
         </tr>
       `).join("");
@@ -905,7 +1097,9 @@
       document.getElementById("rider-withdrawals-tbody").innerHTML = myWithdrawals.map(w => `
         <tr>
           <td>${w.id}</td>
-          <td>${w.amount}원</td>
+          <td>${formatKrw(w.amount)}</td>
+          <td>${formatKrw(Number(w.fee) || 0)}</td>
+          <td>${formatKrw(w.amount + (Number(w.fee) || 0))}</td>
           <td>${formatDateTime(w.createdAt)}</td>
           <td>${formatDateTime(w.processedAt)}</td>
           <td>${w.status}</td>
@@ -1020,7 +1214,7 @@
     document.getElementById("charge-rider-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const riderId = Number(document.getElementById("charge-rider").value);
-      const amount = Number(document.getElementById("charge-amount").value);
+      const amount = parseMoneyInputValue("charge-amount");
 
       try {
         const data = await requestJson(`/api/riders/${riderId}/charge`, {
@@ -1038,7 +1232,7 @@
     document.getElementById("delivery-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const riderId = Number(document.getElementById("delivery-rider").value);
-      const fare = Number(document.getElementById("delivery-fare").value);
+      const fare = parseMoneyInputValue("delivery-fare");
 
       try {
         const data = await requestJson("/api/deliveries", {
@@ -1047,7 +1241,7 @@
         });
         const delivery = data.delivery;
         const rider = allRiders.find(r => r.id === riderId);
-        alert(`✅ 배달 추가 완료!\n배달료: ${delivery.fare}원\n수수료: ${delivery.fee100 + delivery.fee16}원\n기사 정산액: ${delivery.final}원\n\n${rider?.name || "선택한 기사"} 기사의 잔액이 즉시 ${delivery.final}원 증가했습니다!`);
+        alert(`✅ 배달 추가 완료!\n배달료: ${formatKrw(delivery.fare)}\n수수료: ${formatKrw(delivery.fee100 + delivery.fee16)}\n기사 정산액: ${formatKrw(delivery.final)}\n\n${rider?.name || "선택한 기사"} 기사의 잔액이 즉시 ${formatKrw(delivery.final)} 증가했습니다!`);
         refreshData();
         document.getElementById("delivery-form").reset();
       } catch (error) {
@@ -1075,14 +1269,19 @@
 
     document.getElementById("rider-withdraw-form").addEventListener("submit", async (e) => {
       e.preventDefault();
-      const amount = Number(document.getElementById("rider-withdraw-amount").value);
+      const amount = parseMoneyInputValue("rider-withdraw-amount");
 
       try {
         const data = await requestJson("/api/withdrawals", {
           method: "POST",
           body: JSON.stringify({ riderId: currentUser.rider_id, amount })
         });
-        setMessage("rider-withdraw-msg", "출금 완료", true);
+        const withdrawFee = Number(data.withdrawal?.fee) || 0;
+        setMessage(
+          "rider-withdraw-msg",
+          `출금 완료 (출금수수료 ${formatKrw(withdrawFee)}, 총차감액 ${formatKrw(amount + withdrawFee)})`,
+          true
+        );
         refreshData();
         document.getElementById("rider-withdraw-form").reset();
       } catch (error) {
@@ -1128,12 +1327,12 @@
       const delivery = allDeliveries.find(d => d.id === deliveryId);
       if (!delivery) return;
       
-      if (confirm(`배달 #${deliveryId}를 완료하시겠습니까?\n정산액: ${delivery.final}원`)) {
+      if (confirm(`배달 #${deliveryId}를 완료하시겠습니까?\n정산액: ${formatKrw(delivery.final)}`)) {
         requestJson(`/api/deliveries/${deliveryId}/complete`, {
           method: "POST"
         }).then(() => {
           refreshData();
-          alert(`✅ 배달 완료!\n배달료: ${delivery.fare}원\n수수료: ${delivery.fee100 + delivery.fee16}원\n정산액: ${delivery.final}원\n\n정산이 완료되었습니다!`);
+          alert(`✅ 배달 완료!\n배달료: ${formatKrw(delivery.fare)}\n수수료: ${formatKrw(delivery.fee100 + delivery.fee16)}\n정산액: ${formatKrw(delivery.final)}\n\n정산이 완료되었습니다!`);
         }).catch((error) => {
           alert(error.message);
         });
@@ -1191,6 +1390,7 @@
     }
 
     setupDashboardMenus();
+    setupMoneyInputs();
     resetDashboardMenus();
     refreshData();
     renderNotice();
