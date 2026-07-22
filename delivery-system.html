@@ -89,6 +89,20 @@
       </div>
 
       <div class="card">
+        <h2>공지사항 관리</h2>
+        <form id="admin-notice-form">
+          <input id="admin-notice-input" placeholder="공지 내용을 입력하세요 (최대 500자)" maxlength="500" />
+          <button type="submit">공지 저장</button>
+        </form>
+        <div id="admin-notice-msg" class="message"></div>
+      </div>
+
+      <div class="card">
+        <h2>현재 공지</h2>
+        <div id="admin-notice-view">등록된 공지가 없습니다.</div>
+      </div>
+
+      <div class="card">
         <h2>지점 관리</h2>
         <form id="create-branch-form">
           <input id="branch-name" placeholder="지점명 (예: 강남점, 강북점)" required />
@@ -104,6 +118,9 @@
           <input id="admin-create-username" placeholder="새 관리자 아이디" required />
           <input id="admin-create-name" placeholder="관리자 이름" required />
           <input id="admin-create-password" type="password" placeholder="초기 비밀번호" required />
+          <select id="admin-create-branch" required>
+            <option value="">관리 지점 선택</option>
+          </select>
           <button type="submit">관리자 추가</button>
         </form>
         <div id="create-admin-msg" class="message"></div>
@@ -113,6 +130,7 @@
               <th>ID</th>
               <th>아이디</th>
               <th>이름</th>
+              <th>지점</th>
               <th>작업</th>
             </tr>
           </thead>
@@ -254,6 +272,7 @@
 
       <div class="card">
         <h2>나의 정산 현황</h2>
+        <div style="margin-bottom: 12px; color: #0b5394; font-weight: bold;" id="rider-notice-view"></div>
         <div class="stats">
           <div class="stat-box">
             <div class="stat-value" id="rider-balance">0원</div>
@@ -338,6 +357,11 @@
       <div class="header">
         <h1>지사장 대시보드 - <span id="sub-admin-company"></span></h1>
         <button class="logout-btn" onclick="logout()">로그아웃</button>
+      </div>
+
+      <div class="card">
+        <h2>공지사항</h2>
+        <div id="sub-admin-notice-view">등록된 공지가 없습니다.</div>
       </div>
 
       <div class="card">
@@ -457,6 +481,7 @@
     let allBranches = [];
     let allSubAdmins = [];
     let allAdmins = [];
+    let currentNotice = "";
     let selectedAdminForReset = null;
 
     function setMessage(elementId, text, isSuccess) {
@@ -470,6 +495,27 @@
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return String(value);
       return date.toLocaleString("ko-KR", { hour12: false });
+    }
+
+    function renderNotice() {
+      const noticeText = currentNotice || "등록된 공지가 없습니다.";
+      const adminNoticeView = document.getElementById("admin-notice-view");
+      const riderNoticeView = document.getElementById("rider-notice-view");
+      const subAdminNoticeView = document.getElementById("sub-admin-notice-view");
+      const adminNoticeInput = document.getElementById("admin-notice-input");
+
+      if (adminNoticeView) {
+        adminNoticeView.textContent = noticeText;
+      }
+      if (riderNoticeView) {
+        riderNoticeView.textContent = currentNotice ? `공지: ${currentNotice}` : "";
+      }
+      if (subAdminNoticeView) {
+        subAdminNoticeView.textContent = noticeText;
+      }
+      if (adminNoticeInput && !adminNoticeInput.value) {
+        adminNoticeInput.value = currentNotice;
+      }
     }
 
     async function requestJson(url, options = {}) {
@@ -516,6 +562,7 @@
         allDeductionLogs = data.deductionLogs || [];
         allBranches = data.branches;
         allSubAdmins = data.subAdmins;
+        currentNotice = data.notice || "";
         
         // 라이더 선택 드롭다운 업데이트 (관리자용)
         const deliveryRider = document.getElementById("delivery-rider");
@@ -528,6 +575,7 @@
         const branchOptions = allBranches.map(b => `<option value="${b.id}">${b.name}</option>`).join("");
         const subAdminBranch = document.getElementById("sub-admin-branch");
         const createRiderBranch = document.getElementById("create-rider-branch");
+        const createAdminBranch = document.getElementById("admin-create-branch");
         const subAdminChargeRider = document.getElementById("sub-admin-charge-rider");
         const subAdminDeductRider = document.getElementById("sub-admin-deduct-rider");
         
@@ -536,6 +584,9 @@
         }
         if (createRiderBranch) {
           createRiderBranch.innerHTML = '<option value="">지점 선택</option>' + branchOptions;
+        }
+        if (createAdminBranch) {
+          createAdminBranch.innerHTML = '<option value="">관리 지점 선택</option>' + branchOptions;
         }
 
         const branchesList = document.getElementById("branches-list");
@@ -554,13 +605,16 @@
         }
         
         if (currentUser?.role === "admin") {
-          await refreshAdminAccounts();
+          if (!currentUser?.branch_id) {
+            await refreshAdminAccounts();
+          }
           updateAdminDashboard();
         } else if (currentUser?.role === "rider") {
           updateRiderDashboard();
         } else if (currentUser?.role === "sub_admin") {
           updateSubAdminDashboard();
         }
+        renderNotice();
       } catch (error) {
         console.error("Failed to refresh data:", error);
       }
@@ -578,6 +632,7 @@
           <td>${admin.id}</td>
           <td>${admin.username}</td>
           <td>${admin.name}</td>
+          <td>${allBranches.find(branch => branch.id === admin.branch_id)?.name || '-'}</td>
           <td>
             ${admin.id === currentUser?.admin_id
               ? '<span style="color: #666;">현재 계정</span>'
@@ -685,10 +740,20 @@
             <td>${formatDateTime(w.createdAt)}</td>
             <td>${formatDateTime(w.processedAt)}</td>
             <td style="color: ${statusColor}; font-weight: bold;">${statusText}</td>
-            <td>${w.status === "pending" ? `<button onclick="approveWithdrawal(${w.id})" style="background: #28a745; padding: 5px 10px; color: white; border: none; border-radius: 3px; cursor: pointer;">승인</button>` : "-"}</td>
+            <td>-</td>
           </tr>
         `;
       }).join("");
+
+      const branchManageEnabled = !currentUser?.branch_id;
+      const branchPanel = document.getElementById("create-branch-form")?.closest(".card");
+      const adminPanel = document.getElementById("create-admin-form")?.closest(".card");
+      if (branchPanel) {
+        branchPanel.hidden = !branchManageEnabled;
+      }
+      if (adminPanel) {
+        adminPanel.hidden = !branchManageEnabled;
+      }
     }
 
     function updateRiderDashboard() {
@@ -795,11 +860,17 @@
       const username = document.getElementById("admin-create-username").value;
       const name = document.getElementById("admin-create-name").value;
       const password = document.getElementById("admin-create-password").value;
+      const branch_id = Number(document.getElementById("admin-create-branch").value);
+
+      if (!branch_id) {
+        setMessage("create-admin-msg", "관리 지점을 선택하세요.", false);
+        return;
+      }
 
       try {
         const data = await requestJson("/api/admins", {
           method: "POST",
-          body: JSON.stringify({ username, name, password })
+          body: JSON.stringify({ username, name, password, branch_id })
         });
         setMessage("create-admin-msg", data.message, true);
         await refreshAdminAccounts();
@@ -891,7 +962,7 @@
           method: "POST",
           body: JSON.stringify({ riderId: currentUser.rider_id, amount })
         });
-        setMessage("rider-withdraw-msg", data.message, true);
+        setMessage("rider-withdraw-msg", "출금 완료", true);
         refreshData();
         document.getElementById("rider-withdraw-form").reset();
       } catch (error) {
@@ -1027,7 +1098,7 @@
             <td>${formatDateTime(w.createdAt)}</td>
             <td>${formatDateTime(w.processedAt)}</td>
             <td style="color: ${statusColor}; font-weight: bold;">${statusText}</td>
-            <td>${w.status === "pending" ? `<button onclick="approveWithdrawal(${w.id})" style="background: #28a745; padding: 5px 10px; color: white; border: none; border-radius: 3px; cursor: pointer;">승인</button>` : "-"}</td>
+            <td>-</td>
           </tr>
         `;
       }).join("");
@@ -1151,6 +1222,23 @@
       }
     });
 
+    document.getElementById("admin-notice-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const notice = document.getElementById("admin-notice-input").value.trim();
+
+      try {
+        const data = await requestJson("/api/notice", {
+          method: "POST",
+          body: JSON.stringify({ notice })
+        });
+        currentNotice = data.notice || "";
+        setMessage("admin-notice-msg", data.message, true);
+        renderNotice();
+      } catch (error) {
+        setMessage("admin-notice-msg", error.message, false);
+      }
+    });
+
     function logout() {
       currentUser = null;
       allAdmins = [];
@@ -1176,6 +1264,7 @@
 
     refreshData();
     updateDeductAmountPreview();
+    renderNotice();
   </script>
 </body>
 </html>

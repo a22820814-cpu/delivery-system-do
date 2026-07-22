@@ -165,8 +165,39 @@ function requireAdminOrSubAdmin(req, res) {
   return requireRole(req, res, ['admin', 'sub_admin']);
 }
 
+function isSuperAdmin(session) {
+  return session.role === 'admin' && !session.branch_id;
+}
+
+function requireSuperAdmin(req, res) {
+  const session = requireAdmin(req, res);
+  if (!session) {
+    return null;
+  }
+  if (!isSuperAdmin(session)) {
+    sendError(res, 403, '최고 관리자만 접근할 수 있습니다.');
+    return null;
+  }
+  return session;
+}
+
 function buildStateForSession(session, state) {
   if (session.role === 'admin') {
+    if (session.branch_id) {
+      const riders = state.riders.filter((rider) => rider.branch_id === session.branch_id);
+      const riderIds = new Set(riders.map((rider) => rider.id));
+      return {
+        branches: state.branches.filter((branch) => branch.id === session.branch_id),
+        riders,
+        subAdmins: state.subAdmins.filter((subAdmin) => subAdmin.branch_id === session.branch_id),
+        deliveries: state.deliveries.filter((delivery) => riderIds.has(delivery.riderId)),
+        withdrawals: state.withdrawals.filter((withdrawal) => riderIds.has(withdrawal.riderId)),
+        deductionLogs: state.deductionLogs.filter((deduction) => riderIds.has(deduction.riderId)),
+        admins: state.admins.filter((admin) => admin.id === session.userId),
+        notice: state.notice,
+      };
+    }
+
     return {
       ...state,
       admins: state.admins,
@@ -183,6 +214,7 @@ function buildStateForSession(session, state) {
       deliveries: state.deliveries.filter((delivery) => riderIds.has(delivery.riderId)),
       withdrawals: state.withdrawals.filter((withdrawal) => riderIds.has(withdrawal.riderId)),
       deductionLogs: state.deductionLogs.filter((deduction) => riderIds.has(deduction.riderId)),
+      notice: state.notice,
     };
   }
 
@@ -194,6 +226,7 @@ function buildStateForSession(session, state) {
     deliveries: state.deliveries.filter((delivery) => delivery.riderId === session.userId),
     withdrawals: state.withdrawals.filter((withdrawal) => withdrawal.riderId === session.userId),
     deductionLogs: state.deductionLogs.filter((deduction) => deduction.riderId === session.userId),
+    notice: state.notice,
   };
 }
 
@@ -226,6 +259,7 @@ function readSeedData() {
         username: DEFAULT_ADMIN_USERNAME,
         password: DEFAULT_ADMIN_PASSWORD,
         name: '시스템 관리자',
+        branch_id: null,
       },
     ],
     branches: [
@@ -313,7 +347,16 @@ async function initializeDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE,
       password TEXT NOT NULL,
-      name TEXT NOT NULL
+      name TEXT NOT NULL,
+      branch_id INTEGER,
+      FOREIGN KEY (branch_id) REFERENCES branches(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT ''
     )
   `);
 
@@ -395,7 +438,9 @@ async function initializeDatabase() {
   await addColumnIfMissing('withdrawals', 'processed_at', 'processed_at TEXT');
   await addColumnIfMissing('deduction_logs', 'daily_amount', 'daily_amount INTEGER');
   await addColumnIfMissing('deduction_logs', 'total_days', 'total_days INTEGER');
+  await addColumnIfMissing('admins', 'branch_id', 'branch_id INTEGER');
   await run('UPDATE withdrawals SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
+  await run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('global_notice', '')");
 
   const seed = readSeedData();
   const branchCount = await get('SELECT COUNT(*) AS count FROM branches');
@@ -403,12 +448,13 @@ async function initializeDatabase() {
     await transaction(async () => {
       for (const admin of seed.admins) {
         await run(
-          'INSERT INTO admins (id, username, password, name) VALUES (?, ?, ?, ?)',
+          'INSERT INTO admins (id, username, password, name, branch_id) VALUES (?, ?, ?, ?, ?)',
           [
             admin.id,
             admin.username,
             isPasswordHash(admin.password) ? admin.password : hashPassword(admin.password),
             admin.name,
+            admin.branch_id || null,
           ]
         );
       }
@@ -497,8 +543,8 @@ async function initializeDatabase() {
   const adminCount = await get('SELECT COUNT(*) AS count FROM admins');
   if (adminCount.count === 0) {
     await run(
-      'INSERT INTO admins (username, password, name) VALUES (?, ?, ?)',
-      [DEFAULT_ADMIN_USERNAME, hashPassword(process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD), '시스템 관리자']
+      'INSERT INTO admins (username, password, name, branch_id) VALUES (?, ?, ?, ?)',
+      [DEFAULT_ADMIN_USERNAME, hashPassword(process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD), '시스템 관리자', null]
     );
   }
 
@@ -506,8 +552,8 @@ async function initializeDatabase() {
 }
 
 async function readState() {
-  const [admins, branches, riders, subAdmins, deliveries, withdrawals, deductionLogs] = await Promise.all([
-    all('SELECT id, username, name FROM admins ORDER BY id'),
+  const [admins, branches, riders, subAdmins, deliveries, withdrawals, deductionLogs, noticeRow] = await Promise.all([
+    all('SELECT id, username, name, branch_id FROM admins ORDER BY id'),
     all('SELECT id, name FROM branches ORDER BY id'),
     all('SELECT id, username, name, balance, bank, account, branch_id FROM riders ORDER BY id'),
     all('SELECT id, username, company_name, branch_id FROM sub_admins ORDER BY id'),
@@ -526,6 +572,7 @@ async function readState() {
        FROM deduction_logs
        ORDER BY id DESC`
     ),
+    get("SELECT value FROM app_settings WHERE key = 'global_notice'"),
   ]);
 
   return {
@@ -536,6 +583,7 @@ async function readState() {
     deliveries,
     withdrawals,
     deductionLogs,
+    notice: noticeRow?.value || '',
   };
 }
 
@@ -561,12 +609,12 @@ app.post('/api/login', withErrorHandling(async (req, res) => {
 
   if (role === 'admin') {
     const admin = await get(
-      'SELECT id, username, password, name FROM admins WHERE username = ?',
+      'SELECT id, username, password, name, branch_id FROM admins WHERE username = ?',
       [username]
     );
     if (admin && verifyPassword(password, admin.password)) {
       const session = createSession('admin', admin);
-      res.json({ success: true, role: 'admin', admin_id: admin.id, username, name: admin.name, token: session.token });
+      res.json({ success: true, role: 'admin', admin_id: admin.id, username, name: admin.name, branch_id: admin.branch_id || null, token: session.token });
       return;
     }
     sendError(res, 401, '로그인 실패');
@@ -621,37 +669,44 @@ app.post('/api/login', withErrorHandling(async (req, res) => {
 }));
 
 app.get('/api/admins', withErrorHandling(async (req, res) => {
-  const session = requireAdmin(req, res);
+  const session = requireSuperAdmin(req, res);
   if (!session) {
     return;
   }
-  const admins = await all('SELECT id, username, name FROM admins ORDER BY id');
+  const admins = await all('SELECT id, username, name, branch_id FROM admins ORDER BY id');
   res.json({ success: true, data: admins });
 }));
 
 app.post('/api/admins', withErrorHandling(async (req, res) => {
-  const session = requireAdmin(req, res);
+  const session = requireSuperAdmin(req, res);
   if (!session) {
     return;
   }
   const username = String(req.body.username || '').trim();
   const password = String(req.body.password || '').trim();
   const name = String(req.body.name || '').trim();
+  const branchId = Number(req.body.branch_id);
 
-  if (!username || !password || !name) {
+  if (!username || !password || !name || !branchId) {
     sendError(res, 400, '관리자 정보를 모두 입력하세요.');
+    return;
+  }
+
+  const branch = await get('SELECT id FROM branches WHERE id = ?', [branchId]);
+  if (!branch) {
+    sendError(res, 404, '지점을 찾을 수 없습니다.');
     return;
   }
 
   try {
     const result = await run(
-      'INSERT INTO admins (username, password, name) VALUES (?, ?, ?)',
-      [username, hashPassword(password), name]
+      'INSERT INTO admins (username, password, name, branch_id) VALUES (?, ?, ?, ?)',
+      [username, hashPassword(password), name, branchId]
     );
     res.json({
       success: true,
       message: '관리자 계정 생성 완료',
-      admin: { id: result.lastID, username, name },
+      admin: { id: result.lastID, username, name, branch_id: branchId },
     });
   } catch (error) {
     if (String(error.message).includes('UNIQUE')) {
@@ -697,7 +752,7 @@ app.post('/api/admins/:adminId/password', withErrorHandling(async (req, res) => 
 }));
 
 app.post('/api/admins/:adminId/reset-password', withErrorHandling(async (req, res) => {
-  const session = requireAdmin(req, res);
+  const session = requireSuperAdmin(req, res);
   if (!session) {
     return;
   }
@@ -727,7 +782,7 @@ app.post('/api/admins/:adminId/reset-password', withErrorHandling(async (req, re
 }));
 
 app.delete('/api/admins/:adminId', withErrorHandling(async (req, res) => {
-  const session = requireAdmin(req, res);
+  const session = requireSuperAdmin(req, res);
   if (!session) {
     return;
   }
@@ -766,7 +821,7 @@ app.delete('/api/admins/:adminId', withErrorHandling(async (req, res) => {
 }));
 
 app.post('/api/branches', withErrorHandling(async (req, res) => {
-  const session = requireAdmin(req, res);
+  const session = requireSuperAdmin(req, res);
   if (!session) {
     return;
   }
@@ -800,6 +855,11 @@ app.post('/api/sub-admins', withErrorHandling(async (req, res) => {
 
   if (!username || !password || !companyName || !branchId) {
     sendError(res, 400, '지사장 정보를 모두 입력하세요.');
+    return;
+  }
+
+  if (session.branch_id && session.branch_id !== branchId) {
+    sendError(res, 403, '본인 지점의 지사장만 생성할 수 있습니다.');
     return;
   }
 
@@ -843,6 +903,11 @@ app.post('/api/riders', withErrorHandling(async (req, res) => {
     return;
   }
 
+  if (session.branch_id && session.branch_id !== branchId) {
+    sendError(res, 403, '본인 지점의 기사만 생성할 수 있습니다.');
+    return;
+  }
+
   const branch = await get('SELECT id FROM branches WHERE id = ?', [branchId]);
   if (!branch) {
     sendError(res, 404, '지점을 찾을 수 없습니다.');
@@ -882,18 +947,15 @@ app.post('/api/riders/:riderId/charge', withErrorHandling(async (req, res) => {
     return;
   }
 
-  const rider = await get('SELECT id FROM riders WHERE id = ?', [riderId]);
+  const rider = await get('SELECT id, branch_id FROM riders WHERE id = ?', [riderId]);
   if (!rider) {
     sendError(res, 404, '기사를 찾을 수 없습니다.');
     return;
   }
 
-  if (session.role === 'sub_admin') {
-    const scopedRider = await get('SELECT id FROM riders WHERE id = ? AND branch_id = ?', [riderId, session.branch_id]);
-    if (!scopedRider) {
-      sendError(res, 403, '해당 지점 기사만 충전할 수 있습니다.');
-      return;
-    }
+  if (session.branch_id && rider.branch_id !== session.branch_id) {
+    sendError(res, 403, '해당 지점 기사만 충전할 수 있습니다.');
+    return;
   }
 
   await run('UPDATE riders SET balance = balance + ? WHERE id = ?', [amount, riderId]);
@@ -965,7 +1027,7 @@ app.post('/api/riders/:riderId/deduct', withErrorHandling(async (req, res) => {
     return;
   }
 
-  if (session.role === 'sub_admin' && rider.branch_id !== session.branch_id) {
+  if (session.branch_id && rider.branch_id !== session.branch_id) {
     sendError(res, 403, '해당 지점 기사만 차감할 수 있습니다.');
     return;
   }
@@ -1028,9 +1090,14 @@ app.post('/api/deliveries', withErrorHandling(async (req, res) => {
     return;
   }
 
-  const rider = await get('SELECT id FROM riders WHERE id = ?', [riderId]);
+  const rider = await get('SELECT id, branch_id FROM riders WHERE id = ?', [riderId]);
   if (!rider) {
     sendError(res, 404, '기사를 찾을 수 없습니다.');
+    return;
+  }
+
+  if (session.branch_id && rider.branch_id !== session.branch_id) {
+    sendError(res, 403, '해당 지점 기사 배달만 추가할 수 있습니다.');
     return;
   }
 
@@ -1130,9 +1197,14 @@ app.post('/api/withdrawals', withErrorHandling(async (req, res) => {
     return;
   }
 
-  const rider = await get('SELECT id, balance FROM riders WHERE id = ?', [riderId]);
+  const rider = await get('SELECT id, branch_id, balance FROM riders WHERE id = ?', [riderId]);
   if (!rider) {
     sendError(res, 404, '기사를 찾을 수 없습니다.');
+    return;
+  }
+
+  if (session.role === 'admin' && session.branch_id && rider.branch_id !== session.branch_id) {
+    sendError(res, 403, '해당 지점 기사 출금만 처리할 수 있습니다.');
     return;
   }
 
@@ -1141,11 +1213,15 @@ app.post('/api/withdrawals', withErrorHandling(async (req, res) => {
     return;
   }
 
-  const result = await run(
-    `INSERT INTO withdrawals (rider_id, amount, status)
-     VALUES (?, ?, 'pending')`,
-    [riderId, amount]
-  );
+  const result = await transaction(async () => {
+    await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [amount, riderId]);
+    const insertResult = await run(
+      `INSERT INTO withdrawals (rider_id, amount, status, processed_at)
+       VALUES (?, ?, 'approved', CURRENT_TIMESTAMP)`,
+      [riderId, amount]
+    );
+    return insertResult;
+  });
   const createdWithdrawal = await get(
     `SELECT id, rider_id AS riderId, amount, status,
             created_at AS createdAt, processed_at AS processedAt
@@ -1155,7 +1231,7 @@ app.post('/api/withdrawals', withErrorHandling(async (req, res) => {
   );
   res.json({
     success: true,
-    message: '출금신청 완료 (관리자 승인 대기 중)',
+    message: '출금 완료',
     withdrawal: createdWithdrawal,
   });
 }));
@@ -1176,12 +1252,14 @@ app.post('/api/withdrawals/:withdrawalId/approve', withErrorHandling(async (req,
     return;
   }
 
-  if (session.role === 'sub_admin') {
-    const scopedRider = await get('SELECT id FROM riders WHERE id = ? AND branch_id = ?', [withdrawal.riderId, session.branch_id]);
-    if (!scopedRider) {
-      sendError(res, 403, '해당 지점 기사 출금만 승인할 수 있습니다.');
-      return;
-    }
+  const scopedRider = await get('SELECT id, branch_id FROM riders WHERE id = ?', [withdrawal.riderId]);
+  if (!scopedRider) {
+    sendError(res, 404, '기사를 찾을 수 없습니다.');
+    return;
+  }
+  if (session.branch_id && scopedRider.branch_id !== session.branch_id) {
+    sendError(res, 403, '해당 지점 기사 출금만 처리할 수 있습니다.');
+    return;
   }
 
   if (withdrawal.status !== 'pending') {
@@ -1272,6 +1350,22 @@ app.post('/api/me/password', withErrorHandling(async (req, res) => {
 
   await run(`UPDATE ${tableName} SET password = ? WHERE id = ?`, [hashPassword(newPassword), session.userId]);
   res.json({ success: true, message: '비밀번호 변경 완료' });
+}));
+
+app.post('/api/notice', withErrorHandling(async (req, res) => {
+  const session = requireAdmin(req, res);
+  if (!session) {
+    return;
+  }
+
+  const notice = String(req.body.notice || '').trim();
+  if (notice.length > 500) {
+    sendError(res, 400, '공지 내용은 500자 이하로 입력하세요.');
+    return;
+  }
+
+  await run("UPDATE app_settings SET value = ? WHERE key = 'global_notice'", [notice]);
+  res.json({ success: true, message: '공지 저장 완료', notice });
 }));
 
 initializeDatabase()
