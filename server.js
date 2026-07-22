@@ -16,6 +16,7 @@ const PASSWORD_HASH_PREFIX = 'scrypt';
 const DEFAULT_ADMIN_USERNAME = 'admin';
 const DEFAULT_ADMIN_PASSWORD = '1234';
 const WITHDRAWAL_FEE = 300;
+const CHARGE_FEE = 300;
 const sessions = new Map();
 
 const db = new sqlite3.Database(SQLITE_PATH);
@@ -198,6 +199,7 @@ function buildStateForSession(session, state) {
       deliveries: state.deliveries.filter((delivery) => riderIds.has(delivery.riderId)),
       withdrawals: state.withdrawals.filter((withdrawal) => riderIds.has(withdrawal.riderId)),
       deductionLogs: state.deductionLogs.filter((deduction) => riderIds.has(deduction.riderId)),
+      chargeLogs: state.chargeLogs.filter((chargeLog) => riderIds.has(chargeLog.riderId)),
       admins: state.admins.filter((admin) => admin.id === session.userId),
       subAdmins: [],
       notice: state.notice,
@@ -212,6 +214,7 @@ function buildStateForSession(session, state) {
     deliveries: state.deliveries.filter((delivery) => delivery.riderId === session.userId),
     withdrawals: state.withdrawals.filter((withdrawal) => withdrawal.riderId === session.userId),
     deductionLogs: state.deductionLogs.filter((deduction) => deduction.riderId === session.userId),
+    chargeLogs: state.chargeLogs.filter((chargeLog) => chargeLog.riderId === session.userId),
     notice: state.notice,
   };
 }
@@ -293,6 +296,7 @@ function readSeedData() {
       { id: 2, riderId: 2, amount: 150000, status: 'pending' },
     ],
     deductionLogs: [],
+    chargeLogs: [],
   };
 
   if (fs.existsSync(SEED_JSON_PATH)) {
@@ -404,6 +408,20 @@ async function initializeDatabase() {
     )
   `);
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS charge_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rider_id INTEGER NOT NULL,
+      amount INTEGER NOT NULL,
+      fee INTEGER NOT NULL,
+      net_amount INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_by_admin_id INTEGER,
+      FOREIGN KEY (rider_id) REFERENCES riders(id),
+      FOREIGN KEY (created_by_admin_id) REFERENCES admins(id)
+    )
+  `);
+
   await addColumnIfMissing('withdrawals', 'created_at', 'created_at TEXT');
   await addColumnIfMissing('withdrawals', 'processed_at', 'processed_at TEXT');
   await addColumnIfMissing('withdrawals', 'fee', 'fee INTEGER');
@@ -411,6 +429,7 @@ async function initializeDatabase() {
   await addColumnIfMissing('deduction_logs', 'daily_amount', 'daily_amount INTEGER');
   await addColumnIfMissing('deduction_logs', 'total_days', 'total_days INTEGER');
   await addColumnIfMissing('admins', 'branch_id', 'branch_id INTEGER');
+  await addColumnIfMissing('charge_logs', 'created_by_admin_id', 'created_by_admin_id INTEGER');
   await run('UPDATE deliveries SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE withdrawals SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE withdrawals SET fee = COALESCE(fee, 0)');
@@ -507,6 +526,25 @@ async function initializeDatabase() {
           ]
         );
       }
+
+      for (const chargeLog of seed.chargeLogs || []) {
+        await run(
+          `INSERT INTO charge_logs
+           (id, rider_id, amount, fee, net_amount, created_at, created_by_admin_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            chargeLog.id,
+            chargeLog.riderId,
+            chargeLog.amount,
+            chargeLog.fee || 0,
+            chargeLog.netAmount != null
+              ? chargeLog.netAmount
+              : (chargeLog.amount - (chargeLog.fee || 0)),
+            chargeLog.createdAt || new Date().toISOString(),
+            chargeLog.createdByAdminId || null,
+          ]
+        );
+      }
     });
   }
 
@@ -522,7 +560,7 @@ async function initializeDatabase() {
 }
 
 async function readState() {
-  const [admins, branches, riders, deliveries, withdrawals, deductionLogs, noticeRow] = await Promise.all([
+  const [admins, branches, riders, deliveries, withdrawals, deductionLogs, chargeLogs, noticeRow] = await Promise.all([
     all('SELECT id, username, name, branch_id FROM admins ORDER BY id'),
     all('SELECT id, name FROM branches ORDER BY id'),
     all('SELECT id, username, name, balance, bank, account, branch_id FROM riders ORDER BY id'),
@@ -546,6 +584,13 @@ async function readState() {
        FROM deduction_logs
        ORDER BY id DESC`
     ),
+    all(
+      `SELECT id, rider_id AS riderId, amount, fee,
+              net_amount AS netAmount, created_at AS createdAt,
+              created_by_admin_id AS createdByAdminId
+       FROM charge_logs
+       ORDER BY id DESC`
+    ),
     get("SELECT value FROM app_settings WHERE key = 'global_notice'"),
   ]);
 
@@ -557,6 +602,7 @@ async function readState() {
     deliveries,
     withdrawals,
     deductionLogs,
+    chargeLogs,
     notice: noticeRow?.value || '',
   };
 }
@@ -848,9 +894,16 @@ app.post('/api/riders/:riderId/charge', withErrorHandling(async (req, res) => {
   }
   const riderId = Number(req.params.riderId);
   const amount = Number(req.body.amount);
+  const fee = CHARGE_FEE;
+  const netAmount = amount - fee;
 
   if (!riderId || !Number.isFinite(amount) || amount <= 0) {
     sendError(res, 400, '충전 정보가 올바르지 않습니다.');
+    return;
+  }
+
+  if (netAmount <= 0) {
+    sendError(res, 400, `충전액은 수수료 ${fee}원보다 커야 합니다.`);
     return;
   }
 
@@ -865,12 +918,29 @@ app.post('/api/riders/:riderId/charge', withErrorHandling(async (req, res) => {
     return;
   }
 
-  await run('UPDATE riders SET balance = balance + ? WHERE id = ?', [amount, riderId]);
+  await transaction(async () => {
+    await run('UPDATE riders SET balance = balance + ? WHERE id = ?', [netAmount, riderId]);
+    await run(
+      `INSERT INTO charge_logs (rider_id, amount, fee, net_amount, created_by_admin_id)
+       VALUES (?, ?, ?, ?, ?)`,
+      [riderId, amount, fee, netAmount, session.userId]
+    );
+  });
   const updatedRider = await get(
     'SELECT id, username, name, balance, bank, account, branch_id FROM riders WHERE id = ?',
     [riderId]
   );
-  res.json({ success: true, message: '충전 완료', rider: updatedRider });
+  res.json({
+    success: true,
+    message: `충전 완료 (입금수수료 ${fee}원, 실충전액 ${netAmount}원)`,
+    rider: updatedRider,
+    charge: {
+      riderId,
+      amount,
+      fee,
+      netAmount,
+    },
+  });
 }));
 
 app.post('/api/riders/:riderId/deduct', withErrorHandling(async (req, res) => {
