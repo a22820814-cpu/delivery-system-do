@@ -352,7 +352,8 @@ async function initializeDatabase() {
   await run(`
     CREATE TABLE IF NOT EXISTS branches (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE
+      name TEXT NOT NULL UNIQUE,
+      balance INTEGER NOT NULL DEFAULT 0
     )
   `);
 
@@ -453,6 +454,7 @@ async function initializeDatabase() {
   await addColumnIfMissing('deliveries', 'created_at', 'created_at TEXT');
   await addColumnIfMissing('deduction_logs', 'daily_amount', 'daily_amount INTEGER');
   await addColumnIfMissing('deduction_logs', 'total_days', 'total_days INTEGER');
+  await addColumnIfMissing('branches', 'balance', 'balance INTEGER NOT NULL DEFAULT 0');
   await addColumnIfMissing('admins', 'branch_id', 'branch_id INTEGER');
   await addColumnIfMissing('charge_logs', 'created_by_admin_id', 'created_by_admin_id INTEGER');
   await addColumnIfMissing('auto_deduct_rules', 'description', "description TEXT NOT NULL DEFAULT ''");
@@ -629,7 +631,7 @@ async function initializeDatabase() {
 async function readState() {
   const [admins, branches, riders, deliveries, withdrawals, deductionLogs, chargeLogs, autoDeductRules, noticeRow] = await Promise.all([
     all('SELECT id, username, name, branch_id FROM admins ORDER BY id'),
-    all('SELECT id, name FROM branches ORDER BY id'),
+    all('SELECT id, name, balance FROM branches ORDER BY id'),
     all('SELECT id, username, name, balance, bank, account, branch_id FROM riders ORDER BY id'),
     all(
       `SELECT id, rider_id AS riderId, fare, fee100, fee16, final,
@@ -1583,7 +1585,7 @@ async function runAutoDeductionCycle() {
             adr.total_days AS totalDays, adr.deducted_amount AS deductedAmount,
             adr.applied_days AS appliedDays, adr.start_date AS startDate,
             adr.weekday, adr.description, adr.last_run_date AS lastRunDate,
-            r.balance
+            r.balance, r.branch_id AS branchId
      FROM auto_deduct_rules adr
      JOIN riders r ON r.id = adr.rider_id
      WHERE adr.enabled = 1`
@@ -1636,6 +1638,9 @@ async function runAutoDeductionCycle() {
 
     await transaction(async () => {
       await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [amount, rule.riderId]);
+      if (rule.branchId) {
+        await run('UPDATE branches SET balance = balance + ? WHERE id = ?', [amount, rule.branchId]);
+      }
       await run(
         `INSERT INTO deduction_logs
          (rider_id, amount, days_count, weekday, monthly_auto, daily_amount, total_days, description, created_by_role)

@@ -1495,7 +1495,9 @@
 
         const branchesList = document.getElementById("branches-list");
         if (branchesList) {
-          branchesList.innerHTML = allBranches.map(branch => `<div>${branch.id}. ${branch.name}</div>`).join("") || "등록된 지점이 없습니다.";
+          branchesList.innerHTML = allBranches.map(branch => (
+            `<div>${branch.id}. ${branch.name} <span style="color:#1d5d60; font-weight:700;">(지사 적립금 ${formatKrw(Number(branch.balance) || 0)})</span></div>`
+          )).join("") || "등록된 지점이 없습니다.";
         }
 
         if (currentUser?.role === "admin") {
