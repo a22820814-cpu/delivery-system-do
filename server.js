@@ -184,7 +184,7 @@ function requireSuperAdmin(req, res) {
 }
 
 function buildStateForSession(session, state) {
-  const resolveBaeminForBranch = (branchId) => {
+  const resolveIntegrationForBranch = (integrationRows, branchId) => {
     if (!branchId) {
       return {
         linked: false,
@@ -192,12 +192,13 @@ function buildStateForSession(session, state) {
         branchName: '',
         partnerId: '',
         storeId: '',
+        baseUrl: '',
         apiKeyMasked: '',
         linkedAt: '',
         lastSyncAt: '',
       };
     }
-    const found = (state.baeminBizIntegrations || []).find((item) => item.branchId === branchId);
+    const found = (integrationRows || []).find((item) => item.branchId === branchId);
     if (!found) {
       return {
         linked: false,
@@ -205,6 +206,7 @@ function buildStateForSession(session, state) {
         branchName: state.branches.find((branch) => branch.id === branchId)?.name || '',
         partnerId: '',
         storeId: '',
+        baseUrl: '',
         apiKeyMasked: '',
         linkedAt: '',
         lastSyncAt: '',
@@ -216,11 +218,15 @@ function buildStateForSession(session, state) {
       branchName: found.branchName || '',
       partnerId: found.partnerId || '',
       storeId: found.storeId || '',
+      baseUrl: found.baseUrl || '',
       apiKeyMasked: found.apiKey ? String(found.apiKey).replace(/.(?=.{4})/g, '*') : '',
       linkedAt: found.linkedAt || '',
       lastSyncAt: found.lastSyncAt || '',
     };
   };
+
+  const resolveBaeminForBranch = (branchId) => resolveIntegrationForBranch(state.baeminBizIntegrations, branchId);
+  const resolveCoupangForBranch = (branchId) => resolveIntegrationForBranch(state.coupangPlusIntegrations, branchId);
 
   if (session.role === 'admin') {
     if (isSuperAdmin(session)) {
@@ -229,6 +235,7 @@ function buildStateForSession(session, state) {
         admins: state.admins,
         subAdmins: [],
         baeminBiz: resolveBaeminForBranch(state.branches[0]?.id || null),
+        coupangPlus: resolveCoupangForBranch(state.branches[0]?.id || null),
       };
     }
 
@@ -252,6 +259,7 @@ function buildStateForSession(session, state) {
           : '',
       },
       baeminBiz: resolveBaeminForBranch(session.branch_id || null),
+      coupangPlus: resolveCoupangForBranch(session.branch_id || null),
     };
   }
 
@@ -280,6 +288,18 @@ function buildStateForSession(session, state) {
       branchName: '',
       partnerId: '',
       storeId: '',
+      baseUrl: '',
+      apiKeyMasked: '',
+      linkedAt: '',
+      lastSyncAt: '',
+    },
+    coupangPlus: {
+      linked: false,
+      branchId: null,
+      branchName: '',
+      partnerId: '',
+      storeId: '',
+      baseUrl: '',
       apiKeyMasked: '',
       linkedAt: '',
       lastSyncAt: '',
@@ -529,6 +549,42 @@ async function initializeDatabase() {
     )
   `);
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS coupang_plus_integrations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      branch_id INTEGER NOT NULL UNIQUE,
+      linked INTEGER NOT NULL DEFAULT 0,
+      partner_id TEXT NOT NULL DEFAULT '',
+      store_id TEXT NOT NULL DEFAULT '',
+      api_key TEXT NOT NULL DEFAULT '',
+      base_url TEXT NOT NULL DEFAULT '',
+      linked_at TEXT,
+      last_sync_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (branch_id) REFERENCES branches(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS baemin_biz_sync_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      branch_id INTEGER NOT NULL,
+      imported_orders INTEGER NOT NULL DEFAULT 0,
+      synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (branch_id) REFERENCES branches(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS coupang_plus_sync_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      branch_id INTEGER NOT NULL,
+      imported_orders INTEGER NOT NULL DEFAULT 0,
+      synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (branch_id) REFERENCES branches(id)
+    )
+  `);
+
   await addColumnIfMissing('withdrawals', 'created_at', 'created_at TEXT');
   await addColumnIfMissing('withdrawals', 'processed_at', 'processed_at TEXT');
   await addColumnIfMissing('withdrawals', 'fee', 'fee INTEGER');
@@ -549,6 +605,7 @@ async function initializeDatabase() {
   await addColumnIfMissing('auto_deduct_rules', 'applied_days', 'applied_days INTEGER NOT NULL DEFAULT 0');
   await addColumnIfMissing('auto_deduct_rules', 'start_date', 'start_date TEXT');
   await addColumnIfMissing('baemin_biz_integrations', 'base_url', "base_url TEXT NOT NULL DEFAULT ''");
+  await addColumnIfMissing('coupang_plus_integrations', 'base_url', "base_url TEXT NOT NULL DEFAULT ''");
   await run('UPDATE deliveries SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE withdrawals SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE withdrawals SET fee = COALESCE(fee, 0)');
@@ -736,6 +793,7 @@ async function readState() {
     businessLinkedAtRow,
     businessBalanceRow,
     baeminBizIntegrations,
+    coupangPlusIntegrations,
   ] = await Promise.all([
     all('SELECT id, username, name, balance, branch_id FROM admins ORDER BY id'),
     all('SELECT id, name, balance FROM branches ORDER BY id'),
@@ -786,11 +844,20 @@ async function readState() {
     all(
       `SELECT bbi.branch_id AS branchId, b.name AS branchName,
               bbi.linked, bbi.partner_id AS partnerId, bbi.store_id AS storeId,
-              bbi.api_key AS apiKey, bbi.linked_at AS linkedAt,
+              bbi.api_key AS apiKey, bbi.base_url AS baseUrl, bbi.linked_at AS linkedAt,
               bbi.last_sync_at AS lastSyncAt
        FROM baemin_biz_integrations bbi
        JOIN branches b ON b.id = bbi.branch_id
        ORDER BY bbi.branch_id`
+    ),
+    all(
+      `SELECT cpi.branch_id AS branchId, b.name AS branchName,
+              cpi.linked, cpi.partner_id AS partnerId, cpi.store_id AS storeId,
+              cpi.api_key AS apiKey, cpi.base_url AS baseUrl, cpi.linked_at AS linkedAt,
+              cpi.last_sync_at AS lastSyncAt
+       FROM coupang_plus_integrations cpi
+       JOIN branches b ON b.id = cpi.branch_id
+       ORDER BY cpi.branch_id`
     ),
   ]);
 
@@ -814,6 +881,7 @@ async function readState() {
       balance: Number(businessBalanceRow?.value || 0),
     },
     baeminBizIntegrations,
+    coupangPlusIntegrations,
   };
 }
 
@@ -2058,13 +2126,37 @@ function normalizeUrl(url) {
 }
 
 async function callBaeminConnectBizApi({ baseUrl, syncPath, apiKey, partnerId, storeId }) {
+  return callPartnerConnectApi({
+    providerLabel: '배민',
+    baseUrl,
+    syncPath,
+    apiKey,
+    partnerId,
+    storeId,
+    partnerHeaderName: 'X-Partner-Id',
+  });
+}
+
+async function callCoupangPlusApi({ baseUrl, syncPath, apiKey, partnerId, storeId }) {
+  return callPartnerConnectApi({
+    providerLabel: '쿠팡플러스',
+    baseUrl,
+    syncPath,
+    apiKey,
+    partnerId,
+    storeId,
+    partnerHeaderName: 'X-Coupang-Partner-Id',
+  });
+}
+
+async function callPartnerConnectApi({ providerLabel, baseUrl, syncPath, apiKey, partnerId, storeId, partnerHeaderName }) {
   if (typeof fetch !== 'function') {
     throw new Error('현재 서버 런타임에서 fetch를 사용할 수 없습니다.');
   }
 
   const cleanBase = normalizeUrl(baseUrl);
   if (!cleanBase) {
-    throw new Error('배민커넥트비즈 API 베이스 URL이 올바르지 않습니다.');
+    throw new Error(`${providerLabel} API 베이스 URL이 올바르지 않습니다.`);
   }
 
   const cleanPath = String(syncPath || '/v1/orders').trim().startsWith('/')
@@ -2083,7 +2175,7 @@ async function callBaeminConnectBizApi({ baseUrl, syncPath, apiKey, partnerId, s
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        'X-Partner-Id': partnerId || '',
+        [partnerHeaderName]: partnerId || '',
         Accept: 'application/json',
       },
       signal: controller.signal,
@@ -2101,7 +2193,7 @@ async function callBaeminConnectBizApi({ baseUrl, syncPath, apiKey, partnerId, s
       const shortBody = typeof payload === 'string'
         ? payload.slice(0, 400)
         : JSON.stringify(payload).slice(0, 400);
-      throw new Error(`배민 API 호출 실패 (${response.status}): ${shortBody}`);
+      throw new Error(`${providerLabel} API 호출 실패 (${response.status}): ${shortBody}`);
     }
 
     let importedOrders = 0;
@@ -2131,6 +2223,10 @@ async function resolveBaeminTargetBranchId(session, rawBranchId) {
   return requested;
 }
 
+async function resolveCoupangTargetBranchId(session, rawBranchId) {
+  return resolveBaeminTargetBranchId(session, rawBranchId);
+}
+
 async function findBaeminIntegrationByBranchId(branchId) {
   return get(
     `SELECT bbi.branch_id AS branchId, b.name AS branchName,
@@ -2142,6 +2238,41 @@ async function findBaeminIntegrationByBranchId(branchId) {
      JOIN branches b ON b.id = bbi.branch_id
      WHERE bbi.branch_id = ?`,
     [branchId]
+  );
+}
+
+async function findCoupangIntegrationByBranchId(branchId) {
+  return get(
+    `SELECT cpi.branch_id AS branchId, b.name AS branchName,
+            cpi.linked, cpi.partner_id AS partnerId,
+            cpi.store_id AS storeId, cpi.api_key AS apiKey,
+            cpi.base_url AS baseUrl,
+            cpi.linked_at AS linkedAt, cpi.last_sync_at AS lastSyncAt
+     FROM coupang_plus_integrations cpi
+     JOIN branches b ON b.id = cpi.branch_id
+     WHERE cpi.branch_id = ?`,
+    [branchId]
+  );
+}
+
+function filterLeaderboardBySessionBranch(session, rows) {
+  if (isSuperAdmin(session)) {
+    return rows;
+  }
+  return rows.filter((row) => row.branchId === session.branch_id);
+}
+
+async function getBranchLeaderboardRows(tableName) {
+  return all(
+    `SELECT b.id AS branchId,
+            b.name AS branchName,
+            COALESCE(SUM(log.imported_orders), 0) AS totalOrders,
+            COUNT(log.id) AS syncCount,
+            MAX(log.synced_at) AS lastSyncedAt
+     FROM branches b
+     LEFT JOIN ${tableName} log ON log.branch_id = b.id
+     GROUP BY b.id, b.name
+     ORDER BY totalOrders DESC, syncCount DESC, b.name ASC`
   );
 }
 
@@ -2327,6 +2458,12 @@ app.post('/api/baemin-biz/sync', withErrorHandling(async (req, res) => {
     [nowIso, branchId]
   );
 
+  await run(
+    `INSERT INTO baemin_biz_sync_logs (branch_id, imported_orders, synced_at)
+     VALUES (?, ?, ?)`,
+    [branchId, Number(syncResult.importedOrders) || 0, nowIso]
+  );
+
   res.json({
     success: true,
     message: `${branch.name} 배민비즈 동기화 완료`,
@@ -2336,6 +2473,227 @@ app.post('/api/baemin-biz/sync', withErrorHandling(async (req, res) => {
       importedOrders: syncResult.importedOrders || 0,
       importedRiders: 0,
       endpoint: syncPath,
+    },
+  });
+}));
+
+app.get('/api/coupang-plus', withErrorHandling(async (req, res) => {
+  const session = requireAdmin(req, res);
+  if (!session) {
+    return;
+  }
+
+  const branchId = await resolveCoupangTargetBranchId(session, req.query.branchId);
+  if (!branchId) {
+    sendError(res, 400, '지점을 선택해 주세요.');
+    return;
+  }
+
+  const branch = await get('SELECT id, name FROM branches WHERE id = ?', [branchId]);
+  if (!branch) {
+    sendError(res, 404, '지점을 찾을 수 없습니다.');
+    return;
+  }
+
+  if (!isSuperAdmin(session) && session.branch_id !== branchId) {
+    sendError(res, 403, '본인 지점만 조회할 수 있습니다.');
+    return;
+  }
+
+  const found = await findCoupangIntegrationByBranchId(branchId);
+  res.json({
+    success: true,
+    data: formatBaeminBizIntegrationRow(found, branch.id, branch.name),
+  });
+}));
+
+app.post('/api/coupang-plus/link', withErrorHandling(async (req, res) => {
+  const session = requireAdmin(req, res);
+  if (!session) {
+    return;
+  }
+
+  const branchId = await resolveCoupangTargetBranchId(session, req.body.branchId);
+  if (!branchId) {
+    sendError(res, 400, '지점을 선택해 주세요.');
+    return;
+  }
+
+  const branch = await get('SELECT id, name FROM branches WHERE id = ?', [branchId]);
+  if (!branch) {
+    sendError(res, 404, '지점을 찾을 수 없습니다.');
+    return;
+  }
+
+  if (!isSuperAdmin(session) && session.branch_id !== branchId) {
+    sendError(res, 403, '본인 지점만 설정할 수 있습니다.');
+    return;
+  }
+
+  const partnerId = String(req.body.partnerId || '').trim();
+  const storeId = String(req.body.storeId || '').trim();
+  const apiKey = String(req.body.apiKey || '').trim();
+  const baseUrl = normalizeUrl(req.body.baseUrl || '');
+  if (!partnerId || !storeId || !apiKey) {
+    sendError(res, 400, '파트너 ID, 스토어 ID, API 키를 모두 입력해 주세요.');
+    return;
+  }
+
+  if (!baseUrl) {
+    sendError(res, 400, '쿠팡플러스 API 베이스 URL을 입력해 주세요.');
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  await run(
+    `INSERT INTO coupang_plus_integrations
+     (branch_id, linked, partner_id, store_id, api_key, base_url, linked_at, updated_at)
+     VALUES (?, 1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(branch_id) DO UPDATE SET
+       linked = 1,
+       partner_id = excluded.partner_id,
+       store_id = excluded.store_id,
+       api_key = excluded.api_key,
+       base_url = excluded.base_url,
+       linked_at = excluded.linked_at,
+       updated_at = CURRENT_TIMESTAMP`,
+    [branchId, partnerId, storeId, apiKey, baseUrl, nowIso]
+  );
+
+  const found = await findCoupangIntegrationByBranchId(branchId);
+  res.json({
+    success: true,
+    message: `${branch.name} 쿠팡플러스 연동 저장 완료`,
+    data: formatBaeminBizIntegrationRow(found, branch.id, branch.name),
+  });
+}));
+
+app.post('/api/coupang-plus/unlink', withErrorHandling(async (req, res) => {
+  const session = requireAdmin(req, res);
+  if (!session) {
+    return;
+  }
+
+  const branchId = await resolveCoupangTargetBranchId(session, req.body.branchId);
+  if (!branchId) {
+    sendError(res, 400, '지점을 선택해 주세요.');
+    return;
+  }
+
+  const branch = await get('SELECT id, name FROM branches WHERE id = ?', [branchId]);
+  if (!branch) {
+    sendError(res, 404, '지점을 찾을 수 없습니다.');
+    return;
+  }
+
+  if (!isSuperAdmin(session) && session.branch_id !== branchId) {
+    sendError(res, 403, '본인 지점만 해제할 수 있습니다.');
+    return;
+  }
+
+  await run(
+    `INSERT INTO coupang_plus_integrations
+     (branch_id, linked, partner_id, store_id, api_key, base_url, linked_at, updated_at)
+     VALUES (?, 0, '', '', '', '', NULL, CURRENT_TIMESTAMP)
+     ON CONFLICT(branch_id) DO UPDATE SET
+       linked = 0,
+       partner_id = '',
+       store_id = '',
+       api_key = '',
+       base_url = '',
+       updated_at = CURRENT_TIMESTAMP`,
+    [branchId]
+  );
+
+  const found = await findCoupangIntegrationByBranchId(branchId);
+  res.json({
+    success: true,
+    message: `${branch.name} 쿠팡플러스 연동 해제 완료`,
+    data: formatBaeminBizIntegrationRow(found, branch.id, branch.name),
+  });
+}));
+
+app.post('/api/coupang-plus/sync', withErrorHandling(async (req, res) => {
+  const session = requireAdmin(req, res);
+  if (!session) {
+    return;
+  }
+
+  const branchId = await resolveCoupangTargetBranchId(session, req.body.branchId);
+  if (!branchId) {
+    sendError(res, 400, '지점을 선택해 주세요.');
+    return;
+  }
+
+  const branch = await get('SELECT id, name FROM branches WHERE id = ?', [branchId]);
+  if (!branch) {
+    sendError(res, 404, '지점을 찾을 수 없습니다.');
+    return;
+  }
+
+  if (!isSuperAdmin(session) && session.branch_id !== branchId) {
+    sendError(res, 403, '본인 지점만 동기화할 수 있습니다.');
+    return;
+  }
+
+  const found = await findCoupangIntegrationByBranchId(branchId);
+  if (!found || !found.linked) {
+    sendError(res, 400, '해당 지점은 쿠팡플러스가 연동되어 있지 않습니다.');
+    return;
+  }
+
+  const syncPath = String(req.body.syncPath || '/v1/orders').trim();
+  const syncResult = await callCoupangPlusApi({
+    baseUrl: found.baseUrl,
+    syncPath,
+    apiKey: found.apiKey,
+    partnerId: found.partnerId,
+    storeId: found.storeId,
+  });
+
+  const nowIso = new Date().toISOString();
+  await run(
+    `UPDATE coupang_plus_integrations
+     SET last_sync_at = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE branch_id = ?`,
+    [nowIso, branchId]
+  );
+
+  await run(
+    `INSERT INTO coupang_plus_sync_logs (branch_id, imported_orders, synced_at)
+     VALUES (?, ?, ?)`,
+    [branchId, Number(syncResult.importedOrders) || 0, nowIso]
+  );
+
+  res.json({
+    success: true,
+    message: `${branch.name} 쿠팡플러스 동기화 완료`,
+    data: {
+      branchId,
+      syncedAt: nowIso,
+      importedOrders: syncResult.importedOrders || 0,
+      importedRiders: 0,
+      endpoint: syncPath,
+    },
+  });
+}));
+
+app.get('/api/branch-leaderboards', withErrorHandling(async (req, res) => {
+  const session = requireAdmin(req, res);
+  if (!session) {
+    return;
+  }
+
+  const [baeminRows, coupangRows] = await Promise.all([
+    getBranchLeaderboardRows('baemin_biz_sync_logs'),
+    getBranchLeaderboardRows('coupang_plus_sync_logs'),
+  ]);
+
+  res.json({
+    success: true,
+    data: {
+      baemin: filterLeaderboardBySessionBranch(session, baeminRows),
+      coupang: filterLeaderboardBySessionBranch(session, coupangRows),
     },
   });
 }));

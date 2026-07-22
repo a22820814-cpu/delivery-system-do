@@ -531,6 +531,7 @@
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="system-profit">시스템 수익</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="business-account">사업자 통장</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="baemin-biz">배민비즈</button>
+        <button type="button" class="menu-btn" data-dashboard="admin" data-section="coupang-plus">쿠팡플러스</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="auto-deduct">자동차감</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="branch-leaderboard">지점 리더보드</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="withdrawal-request">출금요청</button>
@@ -541,8 +542,15 @@
       </div>
 
       <div class="card" data-section="branch-leaderboard">
-        <h2>지점별 랭킹 리더보드</h2>
-        <div id="branch-leaderboard-wrap">리더보드 데이터를 불러오는 중...</div>
+        <h2>지점별 플랫폼 랭킹 리더보드</h2>
+        <div class="card" style="margin-top: 12px;">
+          <h3 style="margin:0 0 8px;">배민 지점 리더보드</h3>
+          <div id="baemin-branch-leaderboard-wrap">리더보드 데이터를 불러오는 중...</div>
+        </div>
+        <div class="card" style="margin-top: 12px;">
+          <h3 style="margin:0 0 8px;">쿠팡 지점 리더보드</h3>
+          <div id="coupang-branch-leaderboard-wrap">리더보드 데이터를 불러오는 중...</div>
+        </div>
       </div>
 
       <div class="card" id="system-profit-card" data-section="system-profit" hidden>
@@ -555,6 +563,7 @@
         <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
           <button type="button" id="go-business-account">사업자 통장 연동으로 이동</button>
           <button type="button" id="go-baemin-biz">배민커넥트비즈 연동으로 이동</button>
+          <button type="button" id="go-coupang-plus">쿠팡플러스 연동으로 이동</button>
         </div>
         <div id="integration-summary" style="color:#365255; font-size:13px;">연동 상태를 불러오는 중...</div>
       </div>
@@ -611,6 +620,35 @@
           </div>
         </form>
         <div id="baemin-biz-msg" class="message"></div>
+      </div>
+
+      <div class="card" id="coupang-plus-card" data-section="coupang-plus" hidden>
+        <h2>쿠팡플러스 연동 (지점별)</h2>
+        <div class="stats" style="margin-bottom: 10px;">
+          <div class="stat-box">
+            <div class="stat-value" id="coupang-link-status">미연동</div>
+            <div class="stat-label">연동 상태</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-value" id="coupang-last-sync">-</div>
+            <div class="stat-label">최근 동기화</div>
+          </div>
+        </div>
+        <div id="coupang-linked-info" style="margin-bottom:12px; color:#3a4f4f; font-size:13px;">연동 정보가 없습니다.</div>
+        <form id="coupang-plus-form">
+          <select id="coupang-branch-select" style="display:none;"></select>
+          <input id="coupang-partner-id" placeholder="파트너 ID" required />
+          <input id="coupang-store-id" placeholder="스토어 ID" required />
+          <input id="coupang-base-url" placeholder="API 베이스 URL (예: https://api.partner.example.com)" required />
+          <input id="coupang-sync-path" placeholder="동기화 경로 (기본: /v1/orders)" value="/v1/orders" />
+          <input id="coupang-api-key" type="password" placeholder="API 키" required />
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="submit">연동 저장</button>
+            <button type="button" id="coupang-sync-btn" style="background:#1d5d60;">동기화 실행</button>
+            <button type="button" id="coupang-unlink-btn" style="background:#7b8d8f;">연동 해제</button>
+          </div>
+        </form>
+        <div id="coupang-plus-msg" class="message"></div>
       </div>
 
       <div class="card" data-section="notice-manage">
@@ -1106,6 +1144,8 @@
     let riderArrears = { summary: null, rows: [] };
     let currentBusinessAccount = null;
     let currentBaeminBiz = null;
+    let currentCoupangPlus = null;
+    let branchLeaderboards = { baemin: [], coupang: [] };
     let currentNotice = "";
     let selectedAdminForReset = null;
     const HISTORY_PAGE_SIZE = 7;
@@ -1500,72 +1540,52 @@
       gridEl.hidden = false;
     }
 
-    function renderBranchLeaderboard() {
-      const wrap = document.getElementById("branch-leaderboard-wrap");
+    function renderSinglePlatformLeaderboard(wrapId, rows, platformLabel) {
+      const wrap = document.getElementById(wrapId);
       if (!wrap) {
         return;
       }
 
-      const branchRows = allBranches.map((branch) => {
-        const ridersInBranch = allRiders.filter((rider) => rider.branch_id === branch.id);
-        const ranked = ridersInBranch.map((rider) => {
-          const riderDeliveries = allDeliveries.filter((delivery) => delivery.riderId === rider.id);
-          const totalSettlement = riderDeliveries.reduce((sum, delivery) => sum + (Number(delivery.final) || 0), 0);
-          return {
-            rider,
-            totalSettlement,
-            deliveryCount: riderDeliveries.length,
-            balance: Number(rider.balance) || 0,
-          };
-        }).sort((a, b) => {
-          if (b.totalSettlement !== a.totalSettlement) {
-            return b.totalSettlement - a.totalSettlement;
-          }
-          if (b.deliveryCount !== a.deliveryCount) {
-            return b.deliveryCount - a.deliveryCount;
-          }
-          return a.rider.name.localeCompare(b.rider.name, "ko-KR");
-        });
+      const list = Array.isArray(rows) ? rows : [];
+      if (list.length === 0) {
+        wrap.innerHTML = `<div style="color:#5f6d6a;">${platformLabel} 리더보드 데이터가 없습니다.</div>`;
+        return;
+      }
 
-        if (ranked.length === 0) {
-          return `
-            <div class="card" style="margin-top: 12px;">
-              <h3 style="margin:0 0 8px;">${branch.name}</h3>
-              <div style="color:#5f6d6a; font-size:13px;">해당 지점에 등록된 기사가 없습니다.</div>
-            </div>
-          `;
-        }
-
-        const rows = ranked.map((entry, index) => `
+      const tableRows = list.map((row, index) => {
+        const totalOrders = Number(row.totalOrders) || 0;
+        const syncCount = Number(row.syncCount) || 0;
+        const lastSyncedAt = row.lastSyncedAt ? formatDateTime(row.lastSyncedAt) : '-';
+        return `
           <tr>
             <td>${index + 1}</td>
-            <td>${entry.rider.name}</td>
-            <td>${formatKrw(entry.totalSettlement)}</td>
-            <td>${formatNumber(entry.deliveryCount)}건</td>
-            <td>${formatKrw(entry.balance)}</td>
+            <td>${row.branchName || '-'}</td>
+            <td>${formatNumber(totalOrders)}건</td>
+            <td>${formatNumber(syncCount)}회</td>
+            <td>${lastSyncedAt}</td>
           </tr>
-        `).join("");
-
-        return `
-          <div class="card" style="margin-top: 12px;">
-            <h3 style="margin:0 0 8px;">${branch.name}</h3>
-            <table>
-              <thead>
-                <tr>
-                  <th>순위</th>
-                  <th>기사</th>
-                  <th>누적 정산액</th>
-                  <th>배달건수</th>
-                  <th>현재 잔액</th>
-                </tr>
-              </thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </div>
         `;
-      });
+      }).join("");
 
-      wrap.innerHTML = branchRows.join("") || '<div style="color:#5f6d6a;">지점 정보가 없습니다.</div>';
+      wrap.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>순위</th>
+              <th>지점</th>
+              <th>누적 주문 동기화</th>
+              <th>동기화 횟수</th>
+              <th>최근 동기화</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      `;
+    }
+
+    function renderBranchLeaderboard() {
+      renderSinglePlatformLeaderboard("baemin-branch-leaderboard-wrap", branchLeaderboards.baemin, "배민");
+      renderSinglePlatformLeaderboard("coupang-branch-leaderboard-wrap", branchLeaderboards.coupang, "쿠팡");
     }
 
     function applyDashboardSection(dashboardType, section) {
@@ -1698,6 +1718,48 @@
       }
     }
 
+    function renderCoupangPlus() {
+      const statusEl = document.getElementById("coupang-link-status");
+      const syncEl = document.getElementById("coupang-last-sync");
+      const infoEl = document.getElementById("coupang-linked-info");
+      const partnerInput = document.getElementById("coupang-partner-id");
+      const storeInput = document.getElementById("coupang-store-id");
+      const baseUrlInput = document.getElementById("coupang-base-url");
+
+      if (!statusEl || !syncEl || !infoEl || !partnerInput || !storeInput || !baseUrlInput) {
+        return;
+      }
+
+      const integration = currentCoupangPlus || {
+        linked: false,
+        partnerId: "",
+        storeId: "",
+        baseUrl: "",
+        apiKeyMasked: "",
+        linkedAt: "",
+        lastSyncAt: "",
+      };
+
+      statusEl.textContent = integration.linked ? "연동 완료" : "미연동";
+      syncEl.textContent = integration.lastSyncAt ? formatDateTime(integration.lastSyncAt) : "-";
+
+      if (integration.linked) {
+        infoEl.textContent = `파트너 ${integration.partnerId} / 스토어 ${integration.storeId} / API ${integration.apiKeyMasked || '-'} / URL ${integration.baseUrl || '-'} / 연동일 ${formatDateTime(integration.linkedAt)}`;
+      } else {
+        infoEl.textContent = "연동 정보가 없습니다.";
+      }
+
+      if (!partnerInput.value) {
+        partnerInput.value = integration.partnerId || "";
+      }
+      if (!storeInput.value) {
+        storeInput.value = integration.storeId || "";
+      }
+      if (!baseUrlInput.value) {
+        baseUrlInput.value = integration.baseUrl || "";
+      }
+    }
+
     function renderIntegrationSummary() {
       const element = document.getElementById("integration-summary");
       if (!element) {
@@ -1706,11 +1768,14 @@
 
       const businessLinked = Boolean(currentBusinessAccount?.linked);
       const baeminLinked = Boolean(currentBaeminBiz?.linked);
+      const coupangLinked = Boolean(currentCoupangPlus?.linked);
       const baeminBranch = currentBaeminBiz?.branchName || (currentUser?.branch_id ? `지점ID ${currentUser.branch_id}` : "선택 지점");
+      const coupangBranch = currentCoupangPlus?.branchName || (currentUser?.branch_id ? `지점ID ${currentUser.branch_id}` : "선택 지점");
 
       const businessText = businessLinked ? "사업자 통장: 연동 완료" : "사업자 통장: 미연동";
       const baeminText = baeminLinked ? `배민커넥트비즈(${baeminBranch}): 연동 완료` : `배민커넥트비즈(${baeminBranch}): 미연동`;
-      element.textContent = `${businessText} / ${baeminText}`;
+      const coupangText = coupangLinked ? `쿠팡플러스(${coupangBranch}): 연동 완료` : `쿠팡플러스(${coupangBranch}): 미연동`;
+      element.textContent = `${businessText} / ${baeminText} / ${coupangText}`;
     }
 
     function getSelectedBaeminBranchId() {
@@ -1739,6 +1804,46 @@
       const data = await requestJson(`/api/baemin-biz${query}`);
       currentBaeminBiz = data.data || null;
       renderBaeminBiz();
+    }
+
+    function getSelectedCoupangBranchId() {
+      if (currentUser?.role !== "admin") {
+        return null;
+      }
+      if (currentUser?.branch_id) {
+        return Number(currentUser.branch_id) || null;
+      }
+      const branchSelect = document.getElementById("coupang-branch-select");
+      const selected = Number(branchSelect?.value || 0);
+      return selected > 0 ? selected : null;
+    }
+
+    async function loadCoupangPlusStatus() {
+      if (currentUser?.role !== "admin") {
+        return;
+      }
+      const branchId = getSelectedCoupangBranchId();
+      if (!branchId) {
+        currentCoupangPlus = null;
+        renderCoupangPlus();
+        return;
+      }
+      const query = `?branchId=${branchId}`;
+      const data = await requestJson(`/api/coupang-plus${query}`);
+      currentCoupangPlus = data.data || null;
+      renderCoupangPlus();
+    }
+
+    async function loadBranchLeaderboards() {
+      if (currentUser?.role !== "admin") {
+        return;
+      }
+      const data = await requestJson('/api/branch-leaderboards');
+      branchLeaderboards = {
+        baemin: data?.data?.baemin || [],
+        coupang: data?.data?.coupang || [],
+      };
+      renderBranchLeaderboard();
     }
 
     async function requestJson(url, options = {}) {
@@ -1788,6 +1893,7 @@
         allBranches = data.branches;
         currentBusinessAccount = data.businessAccount || null;
         currentBaeminBiz = data.baeminBiz || null;
+        currentCoupangPlus = data.coupangPlus || null;
         currentNotice = data.notice || "";
         
         // 라이더 선택 드롭다운 업데이트 (관리자용)
@@ -1813,6 +1919,7 @@
         const createRiderBranch = document.getElementById("create-rider-branch");
         const createAdminBranch = document.getElementById("admin-create-branch");
         const baeminBranchSelect = document.getElementById("baemin-branch-select");
+        const coupangBranchSelect = document.getElementById("coupang-branch-select");
 
         if (createRiderBranch) {
           createRiderBranch.innerHTML = '<option value="">지점 선택</option>' + branchOptions;
@@ -1837,6 +1944,23 @@
           }
         }
 
+        if (coupangBranchSelect) {
+          if (currentUser?.role === "admin" && !currentUser?.branch_id) {
+            coupangBranchSelect.style.display = "";
+            coupangBranchSelect.innerHTML = '<option value="">쿠팡플러스 연동 지점 선택</option>' + branchOptions;
+            if (!coupangBranchSelect.value) {
+              coupangBranchSelect.value = allBranches[0]?.id ? String(allBranches[0].id) : "";
+            }
+          } else if (currentUser?.role === "admin" && currentUser?.branch_id) {
+            const ownBranch = allBranches.find((branch) => branch.id === currentUser.branch_id);
+            coupangBranchSelect.style.display = "none";
+            coupangBranchSelect.innerHTML = ownBranch
+              ? `<option value="${ownBranch.id}">${ownBranch.name}</option>`
+              : '<option value="">지점 없음</option>';
+            coupangBranchSelect.value = String(currentUser.branch_id);
+          }
+        }
+
         const branchesList = document.getElementById("branches-list");
         if (branchesList) {
           branchesList.innerHTML = allBranches.map(branch => (
@@ -1850,6 +1974,8 @@
             await refreshAdminAccounts();
           }
           await loadBaeminBizStatus();
+          await loadCoupangPlusStatus();
+          await loadBranchLeaderboards();
           updateAdminDashboard();
         } else if (currentUser?.role === "rider") {
           try {
@@ -2019,6 +2145,7 @@
       const profitCard = document.getElementById("system-profit-card");
       const businessCard = document.getElementById("business-account-card");
       const baeminCard = document.getElementById("baemin-biz-card");
+      const coupangCard = document.getElementById("coupang-plus-card");
       const profitStats = document.getElementById("system-profit-stats");
       const showSystemProfit = isSystemAdminUser();
       if (profitCard) {
@@ -2029,6 +2156,9 @@
       }
       if (baeminCard) {
         baeminCard.hidden = false;
+      }
+      if (coupangCard) {
+        coupangCard.hidden = false;
       }
       if (profitStats && showSystemProfit) {
         const totalWithdrawalFee = allWithdrawals.reduce((sum, w) => sum + (Number(w.fee) || 0), 0);
@@ -2069,11 +2199,15 @@
       document.querySelectorAll('#admin-menu .menu-btn[data-section="baemin-biz"]').forEach((button) => {
         button.hidden = false;
       });
+      document.querySelectorAll('#admin-menu .menu-btn[data-section="coupang-plus"]').forEach((button) => {
+        button.hidden = false;
+      });
 
       renderBranchLeaderboard();
       renderAutoDeductRules();
       renderBusinessAccount();
       renderBaeminBiz();
+      renderCoupangPlus();
       renderIntegrationSummary();
     }
 
@@ -2603,11 +2737,89 @@
       applyDashboardSection("admin", "baemin-biz");
     });
 
+    document.getElementById("go-coupang-plus")?.addEventListener("click", () => {
+      applyDashboardSection("admin", "coupang-plus");
+    });
+
     document.getElementById("baemin-branch-select")?.addEventListener("change", async () => {
       try {
         await loadBaeminBizStatus();
       } catch (error) {
         setMessage('baemin-biz-msg', error.message, false);
+      }
+    });
+
+    document.getElementById("coupang-plus-form")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const branchId = getSelectedCoupangBranchId();
+      const partnerId = document.getElementById("coupang-partner-id").value.trim();
+      const storeId = document.getElementById("coupang-store-id").value.trim();
+      const baseUrl = document.getElementById("coupang-base-url").value.trim();
+      const apiKey = document.getElementById("coupang-api-key").value.trim();
+
+      if (!branchId) {
+        setMessage('coupang-plus-msg', '연동할 지점을 선택해 주세요.', false);
+        return;
+      }
+
+      try {
+        const data = await requestJson('/api/coupang-plus/link', {
+          method: 'POST',
+          body: JSON.stringify({ branchId, partnerId, storeId, baseUrl, apiKey })
+        });
+        currentCoupangPlus = data.data || null;
+        setMessage('coupang-plus-msg', data.message || '쿠팡플러스 연동 저장 완료', true);
+        document.getElementById("coupang-api-key").value = "";
+        renderCoupangPlus();
+      } catch (error) {
+        setMessage('coupang-plus-msg', error.message, false);
+      }
+    });
+
+    document.getElementById("coupang-unlink-btn")?.addEventListener("click", async () => {
+      const branchId = getSelectedCoupangBranchId();
+      if (!branchId) {
+        setMessage('coupang-plus-msg', '해제할 지점을 선택해 주세요.', false);
+        return;
+      }
+      try {
+        const data = await requestJson('/api/coupang-plus/unlink', {
+          method: 'POST',
+          body: JSON.stringify({ branchId })
+        });
+        currentCoupangPlus = data.data || null;
+        setMessage('coupang-plus-msg', data.message || '쿠팡플러스 연동 해제 완료', true);
+        renderCoupangPlus();
+        await loadBranchLeaderboards();
+      } catch (error) {
+        setMessage('coupang-plus-msg', error.message, false);
+      }
+    });
+
+    document.getElementById("coupang-sync-btn")?.addEventListener("click", async () => {
+      const branchId = getSelectedCoupangBranchId();
+      const syncPath = document.getElementById("coupang-sync-path")?.value?.trim() || "/v1/orders";
+      if (!branchId) {
+        setMessage('coupang-plus-msg', '동기화할 지점을 선택해 주세요.', false);
+        return;
+      }
+      try {
+        const data = await requestJson('/api/coupang-plus/sync', {
+          method: 'POST',
+          body: JSON.stringify({ branchId, syncPath })
+        });
+        setMessage('coupang-plus-msg', data.message || '동기화 완료', true);
+        await refreshData();
+      } catch (error) {
+        setMessage('coupang-plus-msg', error.message, false);
+      }
+    });
+
+    document.getElementById("coupang-branch-select")?.addEventListener("change", async () => {
+      try {
+        await loadCoupangPlusStatus();
+      } catch (error) {
+        setMessage('coupang-plus-msg', error.message, false);
       }
     });
 
