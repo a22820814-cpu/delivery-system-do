@@ -341,6 +341,37 @@
       line-height: 1.5;
     }
 
+    .withdraw-info-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .withdraw-info-chip {
+      border: 1px solid rgba(14, 138, 116, 0.22);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: rgba(255, 255, 255, 0.82);
+      min-width: 0;
+    }
+
+    .withdraw-info-chip span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .withdraw-info-chip strong {
+      display: block;
+      color: #155d5e;
+      font-size: 18px;
+      font-family: 'Space Grotesk', sans-serif;
+      overflow-wrap: anywhere;
+      word-break: keep-all;
+    }
+
     @keyframes lift-in {
       from { opacity: 0; transform: translateY(10px); }
       to { opacity: 1; transform: translateY(0); }
@@ -352,6 +383,12 @@
       .role-btn { min-width: 140px; }
       th, td { padding: 8px 9px; font-size: 12px; }
       .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .withdraw-info-grid { grid-template-columns: 1fr; }
+      table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
     }
   </style>
 </head>
@@ -630,6 +667,8 @@
             <tr>
               <th>번호</th>
               <th>라이더</th>
+              <th>현재 잔액</th>
+              <th>출금가능 금액</th>
               <th>출금액</th>
               <th>출금수수료</th>
               <th>총차감액</th>
@@ -699,6 +738,16 @@
 
       <div class="card" data-section="withdraw-request">
         <h2>출금 요청</h2>
+        <div class="withdraw-info-grid">
+          <div class="withdraw-info-chip">
+            <span>현재 잔액</span>
+            <strong id="rider-withdraw-balance">0원</strong>
+          </div>
+          <div class="withdraw-info-chip">
+            <span>출금요청 가능 금액</span>
+            <strong id="rider-withdrawable-amount">0원</strong>
+          </div>
+        </div>
         <form id="rider-withdraw-form">
           <div class="money-input">
             <input id="rider-withdraw-amount" type="text" inputmode="numeric" placeholder="출금액" required />
@@ -1129,10 +1178,14 @@
         const statusColor = w.status === "pending" ? "#ff9800" : (w.status === "approved" ? "#28a745" : "#dc3545");
         const statusText = w.status === "pending" ? "대기 중" : (w.status === "approved" ? "승인" : "거부");
         const fee = Number(w.fee) || 0;
+        const riderBalance = Number(rider?.balance) || 0;
+        const riderWithdrawable = Math.max(riderBalance - 300, 0);
         return `
           <tr>
             <td>${w.id}</td>
             <td>${rider?.name || "불명"}</td>
+            <td>${formatKrw(riderBalance)}</td>
+            <td>${formatKrw(riderWithdrawable)}</td>
             <td>${formatKrw(w.amount)}</td>
             <td>${formatKrw(fee)}</td>
             <td>${formatKrw(w.amount + fee)}</td>
@@ -1192,9 +1245,14 @@
       const rider = allRiders.find(r => r.id === riderId);
       const myDeliveries = allDeliveries.filter(d => d.riderId === riderId);
       const myWithdrawals = allWithdrawals.filter(w => w.riderId === riderId);
+      const withdrawalFee = 300;
+      const balance = Number(rider?.balance) || 0;
+      const withdrawableAmount = Math.max(balance - withdrawalFee, 0);
 
       document.getElementById("rider-name").textContent = rider?.name || "기사";
-      document.getElementById("rider-balance").textContent = formatKrw(rider?.balance || 0);
+      document.getElementById("rider-balance").textContent = formatKrw(balance);
+      document.getElementById("rider-withdraw-balance").textContent = formatKrw(balance);
+      document.getElementById("rider-withdrawable-amount").textContent = formatKrw(withdrawableAmount);
       document.getElementById("rider-delivery-count").textContent = myDeliveries.length;
       document.getElementById("rider-withdrawal-count").textContent = myWithdrawals.length;
 
@@ -1412,16 +1470,30 @@
     document.getElementById("rider-withdraw-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const amount = parseMoneyInputValue("rider-withdraw-amount");
+      const rider = allRiders.find((item) => item.id === currentUser.rider_id);
+      const balance = Number(rider?.balance) || 0;
+      const withdrawFee = 300;
+      const withdrawableAmount = Math.max(balance - withdrawFee, 0);
+
+      if (amount <= 0) {
+        setMessage("rider-withdraw-msg", "출금액을 입력해 주세요.", false);
+        return;
+      }
+
+      if (amount > withdrawableAmount) {
+        setMessage("rider-withdraw-msg", `출금 가능 금액은 ${formatKrw(withdrawableAmount)} 입니다.`, false);
+        return;
+      }
 
       try {
         const data = await requestJson("/api/withdrawals", {
           method: "POST",
           body: JSON.stringify({ riderId: currentUser.rider_id, amount })
         });
-        const withdrawFee = Number(data.withdrawal?.fee) || 0;
+        const responseWithdrawFee = Number(data.withdrawal?.fee) || 0;
         setMessage(
           "rider-withdraw-msg",
-          `출금 완료 (출금수수료 ${formatKrw(withdrawFee)}, 총차감액 ${formatKrw(amount + withdrawFee)})`,
+          `출금 완료 (출금수수료 ${formatKrw(responseWithdrawFee)}, 총차감액 ${formatKrw(amount + responseWithdrawFee)})`,
           true
         );
         refreshData();
