@@ -428,6 +428,7 @@
       <div id="admin-menu" class="dashboard-menu">
         <button type="button" class="menu-btn active" data-dashboard="admin" data-section="all">전체</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="system-profit">시스템 수익</button>
+        <button type="button" class="menu-btn" data-dashboard="admin" data-section="auto-deduct">자동차감</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="withdrawal-request">출금요청</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="recent-deliveries">최근 배달</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="charge">잔액 충전</button>
@@ -536,6 +537,45 @@
           <button type="submit">충전</button>
         </form>
         <div id="charge-msg" class="message"></div>
+      </div>
+
+      <div class="card" data-section="auto-deduct">
+        <h2>자동차감 설정</h2>
+        <form id="auto-deduct-form">
+          <select id="auto-deduct-rider" required>
+            <option value="">라이더 선택</option>
+          </select>
+          <input id="auto-deduct-amount" type="text" inputmode="numeric" placeholder="하루 차감액" required />
+          <select id="auto-deduct-weekday">
+            <option value="">매일 실행</option>
+            <option value="월">월요일</option>
+            <option value="화">화요일</option>
+            <option value="수">수요일</option>
+            <option value="목">목요일</option>
+            <option value="금">금요일</option>
+            <option value="토">토요일</option>
+            <option value="일">일요일</option>
+          </select>
+          <input id="auto-deduct-description" placeholder="설명 (예: 유니폼비)" maxlength="200" />
+          <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:#355;">
+            <input id="auto-deduct-enabled" type="checkbox" checked /> 활성화
+          </label>
+          <button type="submit">자동차감 저장</button>
+        </form>
+        <div id="auto-deduct-msg" class="message"></div>
+        <table style="margin-top:12px;">
+          <thead>
+            <tr>
+              <th>라이더</th>
+              <th>하루 차감액</th>
+              <th>실행 요일</th>
+              <th>상태</th>
+              <th>설명</th>
+              <th>최근 실행일</th>
+            </tr>
+          </thead>
+          <tbody id="auto-deduct-tbody"></tbody>
+        </table>
       </div>
 
       <div class="card" data-section="delivery-add">
@@ -733,6 +773,7 @@
     let allWithdrawals = [];
     let allDeductionLogs = [];
     let allChargeLogs = [];
+    let allAutoDeductRules = [];
     let allBranches = [];
     let allAdmins = [];
     let currentNotice = "";
@@ -807,6 +848,35 @@
       setupMoneyInput("charge-amount");
       setupMoneyInput("delivery-fare");
       setupMoneyInput("rider-withdraw-amount");
+      setupMoneyInput("auto-deduct-amount");
+    }
+
+    function renderAutoDeductRules() {
+      const tbody = document.getElementById("auto-deduct-tbody");
+      if (!tbody) {
+        return;
+      }
+
+      const rows = allRiders.map((rider) => {
+        const rule = allAutoDeductRules.find((item) => item.riderId === rider.id);
+        const dailyAmount = rule ? Number(rule.dailyAmount) || 0 : 0;
+        const weekday = rule?.weekday ? `${rule.weekday}요일` : "매일";
+        const enabled = rule?.enabled ? "활성" : "비활성";
+        const description = rule?.description || "-";
+        const lastRunDate = formatDateTime(rule?.lastRunDate);
+        return `
+          <tr>
+            <td>${rider.name}</td>
+            <td>${formatKrw(dailyAmount)}</td>
+            <td>${weekday}</td>
+            <td>${enabled}</td>
+            <td>${description}</td>
+            <td>${lastRunDate}</td>
+          </tr>
+        `;
+      }).join("");
+
+      tbody.innerHTML = rows || '<tr><td colspan="6">설정된 규칙이 없습니다.</td></tr>';
     }
 
     function applyDashboardSection(dashboardType, section) {
@@ -899,15 +969,20 @@
         allWithdrawals = data.withdrawals;
         allDeductionLogs = data.deductionLogs || [];
         allChargeLogs = data.chargeLogs || [];
+        allAutoDeductRules = data.autoDeductRules || [];
         allBranches = data.branches;
         currentNotice = data.notice || "";
         
         // 라이더 선택 드롭다운 업데이트 (관리자용)
         const deliveryRider = document.getElementById("delivery-rider");
         const chargeRider = document.getElementById("charge-rider");
+        const autoDeductRider = document.getElementById("auto-deduct-rider");
         const options = allRiders.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
         deliveryRider.innerHTML = '<option value="">라이더 선택</option>' + options;
         chargeRider.innerHTML = '<option value="">라이더 선택</option>' + options;
+        if (autoDeductRider) {
+          autoDeductRider.innerHTML = '<option value="">라이더 선택</option>' + options;
+        }
         
         // 지점 선택 드롭다운 업데이트
         const branchOptions = allBranches.map(b => `<option value="${b.id}">${b.name}</option>`).join("");
@@ -1108,6 +1183,8 @@
       document.querySelectorAll('#admin-menu .menu-btn[data-section="system-profit"]').forEach((button) => {
         button.hidden = !isSystemAdminUser();
       });
+
+      renderAutoDeductRules();
     }
 
     function updateRiderDashboard() {
@@ -1291,6 +1368,26 @@
         document.getElementById("delivery-form").reset();
       } catch (error) {
         alert(error.message);
+      }
+    });
+
+    document.getElementById("auto-deduct-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const riderId = Number(document.getElementById("auto-deduct-rider").value);
+      const dailyAmount = parseMoneyInputValue("auto-deduct-amount");
+      const weekday = document.getElementById("auto-deduct-weekday").value;
+      const description = document.getElementById("auto-deduct-description").value;
+      const enabled = document.getElementById("auto-deduct-enabled").checked;
+
+      try {
+        const data = await requestJson(`/api/riders/${riderId}/auto-deduct`, {
+          method: "POST",
+          body: JSON.stringify({ dailyAmount, weekday, description, enabled })
+        });
+        setMessage("auto-deduct-msg", data.message, true);
+        await refreshData();
+      } catch (error) {
+        setMessage("auto-deduct-msg", error.message, false);
       }
     });
 
