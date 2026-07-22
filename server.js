@@ -17,6 +17,8 @@ const DEFAULT_ADMIN_USERNAME = 'admin';
 const DEFAULT_ADMIN_PASSWORD = '1234';
 const WITHDRAWAL_FEE = 300;
 const CHARGE_FEE = 300;
+const AUTO_DEDUCT_INTERVAL_MS = 60 * 1000;
+const KOREAN_WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const sessions = new Map();
 
 const db = new sqlite3.Database(SQLITE_PATH);
@@ -200,6 +202,7 @@ function buildStateForSession(session, state) {
       withdrawals: state.withdrawals.filter((withdrawal) => riderIds.has(withdrawal.riderId)),
       deductionLogs: state.deductionLogs.filter((deduction) => riderIds.has(deduction.riderId)),
       chargeLogs: state.chargeLogs.filter((chargeLog) => riderIds.has(chargeLog.riderId)),
+      autoDeductRules: state.autoDeductRules.filter((rule) => riderIds.has(rule.riderId)),
       admins: state.admins.filter((admin) => admin.id === session.userId),
       subAdmins: [],
       notice: state.notice,
@@ -215,6 +218,7 @@ function buildStateForSession(session, state) {
     withdrawals: state.withdrawals.filter((withdrawal) => withdrawal.riderId === session.userId),
     deductionLogs: state.deductionLogs.filter((deduction) => deduction.riderId === session.userId),
     chargeLogs: state.chargeLogs.filter((chargeLog) => chargeLog.riderId === session.userId),
+    autoDeductRules: state.autoDeductRules.filter((rule) => rule.riderId === session.userId),
     notice: state.notice,
   };
 }
@@ -297,6 +301,7 @@ function readSeedData() {
     ],
     deductionLogs: [],
     chargeLogs: [],
+    autoDeductRules: [],
   };
 
   if (fs.existsSync(SEED_JSON_PATH)) {
@@ -422,6 +427,21 @@ async function initializeDatabase() {
     )
   `);
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS auto_deduct_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rider_id INTEGER NOT NULL UNIQUE,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      daily_amount INTEGER NOT NULL DEFAULT 0,
+      weekday TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      last_run_date TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (rider_id) REFERENCES riders(id)
+    )
+  `);
+
   await addColumnIfMissing('withdrawals', 'created_at', 'created_at TEXT');
   await addColumnIfMissing('withdrawals', 'processed_at', 'processed_at TEXT');
   await addColumnIfMissing('withdrawals', 'fee', 'fee INTEGER');
@@ -430,9 +450,15 @@ async function initializeDatabase() {
   await addColumnIfMissing('deduction_logs', 'total_days', 'total_days INTEGER');
   await addColumnIfMissing('admins', 'branch_id', 'branch_id INTEGER');
   await addColumnIfMissing('charge_logs', 'created_by_admin_id', 'created_by_admin_id INTEGER');
+  await addColumnIfMissing('auto_deduct_rules', 'description', "description TEXT NOT NULL DEFAULT ''");
+  await addColumnIfMissing('auto_deduct_rules', 'last_run_date', 'last_run_date TEXT');
+  await addColumnIfMissing('auto_deduct_rules', 'created_at', 'created_at TEXT');
+  await addColumnIfMissing('auto_deduct_rules', 'updated_at', 'updated_at TEXT');
   await run('UPDATE deliveries SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE withdrawals SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE withdrawals SET fee = COALESCE(fee, 0)');
+  await run('UPDATE auto_deduct_rules SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
+  await run('UPDATE auto_deduct_rules SET updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)');
   await run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('global_notice', '')");
 
   const seed = readSeedData();
@@ -545,6 +571,25 @@ async function initializeDatabase() {
           ]
         );
       }
+
+      for (const autoRule of seed.autoDeductRules || []) {
+        await run(
+          `INSERT INTO auto_deduct_rules
+           (id, rider_id, enabled, daily_amount, weekday, description, last_run_date, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            autoRule.id,
+            autoRule.riderId,
+            autoRule.enabled ? 1 : 0,
+            autoRule.dailyAmount || 0,
+            autoRule.weekday || '',
+            autoRule.description || '',
+            autoRule.lastRunDate || null,
+            autoRule.createdAt || new Date().toISOString(),
+            autoRule.updatedAt || new Date().toISOString(),
+          ]
+        );
+      }
     });
   }
 
@@ -560,7 +605,7 @@ async function initializeDatabase() {
 }
 
 async function readState() {
-  const [admins, branches, riders, deliveries, withdrawals, deductionLogs, chargeLogs, noticeRow] = await Promise.all([
+  const [admins, branches, riders, deliveries, withdrawals, deductionLogs, chargeLogs, autoDeductRules, noticeRow] = await Promise.all([
     all('SELECT id, username, name, branch_id FROM admins ORDER BY id'),
     all('SELECT id, name FROM branches ORDER BY id'),
     all('SELECT id, username, name, balance, bank, account, branch_id FROM riders ORDER BY id'),
@@ -591,6 +636,13 @@ async function readState() {
        FROM charge_logs
        ORDER BY id DESC`
     ),
+    all(
+      `SELECT id, rider_id AS riderId, enabled, daily_amount AS dailyAmount,
+              weekday, description, last_run_date AS lastRunDate,
+              created_at AS createdAt, updated_at AS updatedAt
+       FROM auto_deduct_rules
+       ORDER BY id`
+    ),
     get("SELECT value FROM app_settings WHERE key = 'global_notice'"),
   ]);
 
@@ -603,6 +655,7 @@ async function readState() {
     withdrawals,
     deductionLogs,
     chargeLogs,
+    autoDeductRules,
     notice: noticeRow?.value || '',
   };
 }
@@ -1054,6 +1107,77 @@ app.post('/api/riders/:riderId/deduct', withErrorHandling(async (req, res) => {
   });
 }));
 
+app.post('/api/riders/:riderId/auto-deduct', withErrorHandling(async (req, res) => {
+  const session = requireAdmin(req, res);
+  if (!session) {
+    return;
+  }
+
+  const riderId = Number(req.params.riderId);
+  const enabled = Boolean(req.body.enabled);
+  const dailyAmount = Number(req.body.dailyAmount);
+  const weekday = String(req.body.weekday || '').trim();
+  const description = String(req.body.description || '').trim();
+
+  if (!riderId) {
+    sendError(res, 400, '기사 정보가 올바르지 않습니다.');
+    return;
+  }
+
+  if (!Number.isFinite(dailyAmount) || dailyAmount <= 0 || !Number.isInteger(dailyAmount)) {
+    sendError(res, 400, '자동차감 금액은 1원 이상의 정수여야 합니다.');
+    return;
+  }
+
+  if (weekday && !KOREAN_WEEKDAYS.includes(weekday)) {
+    sendError(res, 400, '요일 값이 올바르지 않습니다.');
+    return;
+  }
+
+  if (description.length > 200) {
+    sendError(res, 400, '자동차감 설명은 200자 이하로 입력하세요.');
+    return;
+  }
+
+  const rider = await get('SELECT id, branch_id FROM riders WHERE id = ?', [riderId]);
+  if (!rider) {
+    sendError(res, 404, '기사를 찾을 수 없습니다.');
+    return;
+  }
+
+  if (!isSuperAdmin(session) && rider.branch_id !== session.branch_id) {
+    sendError(res, 403, '해당 지점 기사만 설정할 수 있습니다.');
+    return;
+  }
+
+  await run(
+    `INSERT INTO auto_deduct_rules (rider_id, enabled, daily_amount, weekday, description, updated_at)
+     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(rider_id) DO UPDATE SET
+       enabled = excluded.enabled,
+       daily_amount = excluded.daily_amount,
+       weekday = excluded.weekday,
+       description = excluded.description,
+       updated_at = CURRENT_TIMESTAMP`,
+    [riderId, enabled ? 1 : 0, dailyAmount, weekday, description]
+  );
+
+  const rule = await get(
+    `SELECT id, rider_id AS riderId, enabled, daily_amount AS dailyAmount,
+            weekday, description, last_run_date AS lastRunDate,
+            created_at AS createdAt, updated_at AS updatedAt
+     FROM auto_deduct_rules
+     WHERE rider_id = ?`,
+    [riderId]
+  );
+
+  res.json({
+    success: true,
+    message: enabled ? '자동차감 설정 완료' : '자동차감 비활성화 완료',
+    rule,
+  });
+}));
+
 app.post('/api/deliveries', withErrorHandling(async (req, res) => {
   const session = requireAdmin(req, res);
   if (!session) {
@@ -1364,8 +1488,83 @@ app.post('/api/notice', withErrorHandling(async (req, res) => {
   res.json({ success: true, message: '공지 저장 완료', notice });
 }));
 
+function getTodayDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+async function runAutoDeductionCycle() {
+  const now = new Date();
+  const today = getTodayDateKey(now);
+  const todayWeekday = KOREAN_WEEKDAYS[now.getDay()];
+
+  const rules = await all(
+    `SELECT adr.id, adr.rider_id AS riderId, adr.enabled,
+            adr.daily_amount AS dailyAmount, adr.weekday,
+            adr.description, adr.last_run_date AS lastRunDate,
+            r.balance
+     FROM auto_deduct_rules adr
+     JOIN riders r ON r.id = adr.rider_id
+     WHERE adr.enabled = 1`
+  );
+
+  for (const rule of rules) {
+    const amount = Number(rule.dailyAmount) || 0;
+    if (amount <= 0) {
+      continue;
+    }
+
+    if (rule.weekday && rule.weekday !== todayWeekday) {
+      continue;
+    }
+
+    if (rule.lastRunDate === today) {
+      continue;
+    }
+
+    if (Number(rule.balance) < amount) {
+      continue;
+    }
+
+    await transaction(async () => {
+      await run('UPDATE riders SET balance = balance - ? WHERE id = ?', [amount, rule.riderId]);
+      await run(
+        `INSERT INTO deduction_logs
+         (rider_id, amount, days_count, weekday, monthly_auto, daily_amount, total_days, description, created_by_role)
+         VALUES (?, ?, ?, ?, 1, ?, NULL, ?, 'system')`,
+        [
+          rule.riderId,
+          amount,
+          1,
+          rule.weekday || todayWeekday,
+          amount,
+          rule.description || '자동차감',
+        ]
+      );
+      await run(
+        'UPDATE auto_deduct_rules SET last_run_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [today, rule.id]
+      );
+    });
+  }
+}
+
+function startAutoDeductionScheduler() {
+  setInterval(() => {
+    runAutoDeductionCycle().catch((error) => {
+      console.error('자동차감 실행 실패:', error);
+    });
+  }, AUTO_DEDUCT_INTERVAL_MS);
+}
+
 initializeDatabase()
   .then(() => {
+    startAutoDeductionScheduler();
+    runAutoDeductionCycle().catch((error) => {
+      console.error('자동차감 초기 실행 실패:', error);
+    });
     app.listen(PORT, () => {
       console.log(`배달 정산 시스템 서버가 ${PORT}번 포트에서 실행 중입니다.`);
     });
