@@ -40,7 +40,6 @@
       <h1 style="text-align: center;">배달 정산 시스템</h1>
       <div class="role-selector">
         <button class="role-btn" onclick="selectRole('admin')">관리자 로그인</button>
-        <button class="role-btn" onclick="selectRole('sub_admin')">지사장 로그인</button>
         <button class="role-btn" onclick="selectRole('rider')">기사 로그인</button>
       </div>
     </div>
@@ -66,18 +65,6 @@
         <button type="submit">로그인</button>
       </form>
       <div id="rider-login-msg" class="message"></div>
-      <button onclick="selectRole(null)" style="margin-top: 10px; background: #6c757d;">뒤로</button>
-    </div>
-
-    <!-- 지사장 로그인 -->
-    <div id="sub-admin-login" class="card" hidden>
-      <h2>지사장 로그인</h2>
-      <form id="sub-admin-login-form">
-        <input id="sub-admin-user" placeholder="사용자명" required />
-        <input id="sub-admin-pass" type="password" placeholder="비밀번호" required />
-        <button type="submit">로그인</button>
-      </form>
-      <div id="sub-admin-login-msg" class="message"></div>
       <button onclick="selectRole(null)" style="margin-top: 10px; background: #6c757d;">뒤로</button>
     </div>
 
@@ -161,20 +148,6 @@
       </div>
 
       <div class="card">
-        <h2>지사장 추가</h2>
-        <form id="create-sub-admin-form">
-          <input id="sub-admin-username" placeholder="아이디" required />
-          <input id="sub-admin-password" type="password" placeholder="비밀번호" required />
-          <input id="sub-admin-company" placeholder="회사명" required />
-          <select id="sub-admin-branch" required>
-            <option value="">지점 선택</option>
-          </select>
-          <button type="submit">지사장 추가</button>
-        </form>
-        <div id="create-sub-admin-msg" class="message"></div>
-      </div>
-
-      <div class="card">
         <h2>기사 추가</h2>
         <form id="create-rider-form">
           <input id="create-username" placeholder="사용자명" required />
@@ -234,6 +207,7 @@
             <tr>
               <th>번호</th>
               <th>라이더</th>
+              <th>배달일시</th>
               <th>요금</th>
               <th>수수료(100원)</th>
               <th>수수료(3.3%)</th>
@@ -325,6 +299,7 @@
           <thead>
             <tr>
               <th>번호</th>
+              <th>배달일시</th>
               <th>요금</th>
               <th>수수료</th>
               <th>정산액</th>
@@ -352,124 +327,6 @@
       </div>
     </div>
 
-    <!-- 지사장 대시보드 -->
-    <div id="sub-admin-dashboard" hidden>
-      <div class="header">
-        <h1>지사장 대시보드 - <span id="sub-admin-company"></span></h1>
-        <button class="logout-btn" onclick="logout()">로그아웃</button>
-      </div>
-
-      <div class="card">
-        <h2>공지사항</h2>
-        <div id="sub-admin-notice-view">등록된 공지가 없습니다.</div>
-      </div>
-
-      <div class="card">
-        <h2>기사 잔액 충전</h2>
-        <form id="sub-admin-charge-rider-form">
-          <select id="sub-admin-charge-rider" required>
-            <option value="">라이더 선택</option>
-          </select>
-          <input id="sub-admin-charge-amount" type="number" placeholder="충전액" required />
-          <button type="submit">충전</button>
-        </form>
-        <div id="sub-admin-charge-msg" class="message"></div>
-      </div>
-
-      <div class="card">
-        <h2>출금 요청 현황</h2>
-        <table id="sub-admin-withdrawals-table">
-          <thead>
-            <tr>
-              <th>번호</th>
-              <th>라이더</th>
-              <th>출금액</th>
-              <th>신청일시</th>
-              <th>처리일시</th>
-              <th>상태</th>
-              <th>작업</th>
-            </tr>
-          </thead>
-          <tbody id="sub-admin-withdrawals-tbody"></tbody>
-        </table>
-      </div>
-
-      <div class="card">
-        <h2>기사 일차감</h2>
-        <form id="sub-admin-deduct-rider-form">
-          <select id="sub-admin-deduct-rider" required>
-            <option value="">라이더 선택</option>
-          </select>
-          <input id="sub-admin-deduct-daily-amount" type="number" placeholder="하루 차감액" required />
-          <input id="sub-admin-deduct-total-days" type="number" value="100" placeholder="총 일수 (기본 100일)" required />
-          <input id="sub-admin-deduct-amount" type="number" placeholder="총 차감액 (자동 계산)" readonly />
-          <select id="sub-admin-deduct-weekday">
-            <option value="">요일 선택 (선택)</option>
-            <option value="월">월</option>
-            <option value="화">화</option>
-            <option value="수">수</option>
-            <option value="목">목</option>
-            <option value="금">금</option>
-            <option value="토">토</option>
-            <option value="일">일</option>
-          </select>
-          <label style="display:flex; gap:8px; align-items:center;">
-            <input id="sub-admin-deduct-monthly-auto" type="checkbox" />
-            월 자동차감
-          </label>
-          <input id="sub-admin-deduct-description" placeholder="차감내용" />
-          <button type="submit" style="background: #dc3545;">일차감 적용</button>
-        </form>
-        <div id="sub-admin-deduct-msg" class="message"></div>
-      </div>
-
-      <div class="card">
-        <h2>차감 기록</h2>
-        <table id="sub-admin-deductions-table">
-          <thead>
-            <tr>
-              <th>번호</th>
-              <th>라이더</th>
-              <th>차감액</th>
-              <th>하루 차감액</th>
-              <th>총일수</th>
-              <th>요일</th>
-              <th>월자동차감</th>
-              <th>차감내용</th>
-              <th>등록시각</th>
-            </tr>
-          </thead>
-          <tbody id="sub-admin-deductions-tbody"></tbody>
-        </table>
-      </div>
-
-      <div class="card">
-        <h2>지사장 비밀번호 변경</h2>
-        <form id="sub-admin-password-form">
-          <input id="sub-admin-current-password" type="password" placeholder="현재 비밀번호" required />
-          <input id="sub-admin-new-password" type="password" placeholder="새 비밀번호" required />
-          <button type="submit">비밀번호 변경</button>
-        </form>
-        <div id="sub-admin-password-msg" class="message"></div>
-      </div>
-
-      <div class="card">
-        <h2>전체 배달 기록</h2>
-        <table id="sub-admin-deliveries-table">
-          <thead>
-            <tr>
-              <th>번호</th>
-              <th>라이더</th>
-              <th>요금</th>
-              <th>수수료(100원)</th>
-              <th>수수료(3.3%)</th>
-              <th>정산액</th>
-            </tr>
-          </thead>
-          <tbody id="sub-admin-deliveries-tbody"></tbody>
-        </table>
-      </div>
-    </div>
   </div>
 
   <script>
@@ -479,7 +336,6 @@
     let allWithdrawals = [];
     let allDeductionLogs = [];
     let allBranches = [];
-    let allSubAdmins = [];
     let allAdmins = [];
     let currentNotice = "";
     let selectedAdminForReset = null;
@@ -501,7 +357,6 @@
       const noticeText = currentNotice || "등록된 공지가 없습니다.";
       const adminNoticeView = document.getElementById("admin-notice-view");
       const riderNoticeView = document.getElementById("rider-notice-view");
-      const subAdminNoticeView = document.getElementById("sub-admin-notice-view");
       const adminNoticeInput = document.getElementById("admin-notice-input");
 
       if (adminNoticeView) {
@@ -509,9 +364,6 @@
       }
       if (riderNoticeView) {
         riderNoticeView.textContent = currentNotice ? `공지: ${currentNotice}` : "";
-      }
-      if (subAdminNoticeView) {
-        subAdminNoticeView.textContent = noticeText;
       }
       if (adminNoticeInput && !adminNoticeInput.value) {
         adminNoticeInput.value = currentNotice;
@@ -541,7 +393,6 @@
       document.getElementById("role-selection").hidden = role !== null;
       document.getElementById("admin-login").hidden = role !== "admin";
       document.getElementById("rider-login").hidden = role !== "rider";
-      document.getElementById("sub-admin-login").hidden = role !== "sub_admin";
       if (role === null) {
         currentUser = null;
       }
@@ -561,7 +412,6 @@
         allWithdrawals = data.withdrawals;
         allDeductionLogs = data.deductionLogs || [];
         allBranches = data.branches;
-        allSubAdmins = data.subAdmins;
         currentNotice = data.notice || "";
         
         // 라이더 선택 드롭다운 업데이트 (관리자용)
@@ -573,15 +423,9 @@
         
         // 지점 선택 드롭다운 업데이트
         const branchOptions = allBranches.map(b => `<option value="${b.id}">${b.name}</option>`).join("");
-        const subAdminBranch = document.getElementById("sub-admin-branch");
         const createRiderBranch = document.getElementById("create-rider-branch");
         const createAdminBranch = document.getElementById("admin-create-branch");
-        const subAdminChargeRider = document.getElementById("sub-admin-charge-rider");
-        const subAdminDeductRider = document.getElementById("sub-admin-deduct-rider");
-        
-        if (subAdminBranch) {
-          subAdminBranch.innerHTML = '<option value="">지점 선택</option>' + branchOptions;
-        }
+
         if (createRiderBranch) {
           createRiderBranch.innerHTML = '<option value="">지점 선택</option>' + branchOptions;
         }
@@ -593,17 +437,7 @@
         if (branchesList) {
           branchesList.innerHTML = allBranches.map(branch => `<div>${branch.id}. ${branch.name}</div>`).join("") || "등록된 지점이 없습니다.";
         }
-        
-        // 지사장용 라이더 드롭다운 (자신의 지점만)
-        if (subAdminChargeRider && currentUser?.branch_id) {
-          const myBranchRiders = allRiders.filter(r => r.branch_id === currentUser.branch_id);
-          const myRiderOptions = myBranchRiders.map(r => `<option value="${r.id}">${r.name}</option>`).join("");
-          subAdminChargeRider.innerHTML = '<option value="">라이더 선택</option>' + myRiderOptions;
-          if (subAdminDeductRider) {
-            subAdminDeductRider.innerHTML = '<option value="">라이더 선택</option>' + myRiderOptions;
-          }
-        }
-        
+
         if (currentUser?.role === "admin") {
           if (!currentUser?.branch_id) {
             await refreshAdminAccounts();
@@ -611,8 +445,6 @@
           updateAdminDashboard();
         } else if (currentUser?.role === "rider") {
           updateRiderDashboard();
-        } else if (currentUser?.role === "sub_admin") {
-          updateSubAdminDashboard();
         }
         renderNotice();
       } catch (error) {
@@ -720,6 +552,7 @@
           <tr>
             <td>${d.id}</td>
             <td>${rider?.name || "불명"}</td>
+            <td>${formatDateTime(d.createdAt)}</td>
             <td>${d.fare}원</td>
             <td>${d.fee100}원</td>
             <td>${d.fee16}원</td>
@@ -777,6 +610,7 @@
       document.getElementById("rider-deliveries-tbody").innerHTML = myDeliveries.map(d => `
         <tr>
           <td>${d.id}</td>
+          <td>${formatDateTime(d.createdAt)}</td>
           <td>${d.fare}원</td>
           <td>${d.fee100 + d.fee16}원</td>
           <td>${d.final}원</td>
@@ -987,26 +821,6 @@
       }
     });
 
-    document.getElementById("create-sub-admin-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const username = document.getElementById("sub-admin-username").value;
-      const password = document.getElementById("sub-admin-password").value;
-      const company_name = document.getElementById("sub-admin-company").value;
-      const branch_id = Number(document.getElementById("sub-admin-branch").value);
-
-      try {
-        const data = await requestJson("/api/sub-admins", {
-          method: "POST",
-          body: JSON.stringify({ username, password, company_name, branch_id })
-        });
-        setMessage("create-sub-admin-msg", data.message, true);
-        refreshData();
-        document.getElementById("create-sub-admin-form").reset();
-      } catch (error) {
-        setMessage("create-sub-admin-msg", error.message, false);
-      }
-    });
-
     document.getElementById("create-branch-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const name = document.getElementById("branch-name").value;
@@ -1053,175 +867,6 @@
       }
     }
 
-    document.getElementById("sub-admin-login-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const username = document.getElementById("sub-admin-user").value;
-      const password = document.getElementById("sub-admin-pass").value;
-
-      try {
-        const data = await requestJson("/api/login", {
-          method: "POST",
-          body: JSON.stringify({ role: "sub_admin", username, password })
-        });
-        currentUser = data;
-        document.getElementById("role-selection").hidden = true;
-        document.getElementById("sub-admin-login").hidden = true;
-        document.getElementById("sub-admin-dashboard").hidden = false;
-        refreshData();
-      } catch (error) {
-        document.getElementById("sub-admin-login-msg").textContent = "로그인 실패";
-      }
-    });
-
-    function updateSubAdminDashboard() {
-      // 지사장 회사명 표시
-      const branchId = currentUser.branch_id;
-      const myBranch = allBranches.find(b => b.id === branchId);
-      document.getElementById("sub-admin-company").textContent = myBranch?.name || "미등록";
-      
-      // 자신의 지점에 속한 라이더만 필터링
-      const myRiders = allRiders.filter(r => r.branch_id === branchId);
-      const myDeliveries = allDeliveries.filter(d => myRiders.some(r => r.id === d.riderId));
-      const myWithdrawals = allWithdrawals.filter(w => myRiders.some(r => r.id === w.riderId));
-      const myDeductions = allDeductionLogs.filter(d => myRiders.some(r => r.id === d.riderId));
-
-      // 출금 요청 테이블 (자신의 지점 라이더만)
-      document.getElementById("sub-admin-withdrawals-tbody").innerHTML = myWithdrawals.map(w => {
-        const rider = myRiders.find(r => r.id === w.riderId);
-        const statusColor = w.status === "pending" ? "#ff9800" : (w.status === "approved" ? "#28a745" : "#dc3545");
-        const statusText = w.status === "pending" ? "대기 중" : (w.status === "approved" ? "승인" : "거부");
-        return `
-          <tr>
-            <td>${w.id}</td>
-            <td>${rider?.name || "불명"}</td>
-            <td>${w.amount}원</td>
-            <td>${formatDateTime(w.createdAt)}</td>
-            <td>${formatDateTime(w.processedAt)}</td>
-            <td style="color: ${statusColor}; font-weight: bold;">${statusText}</td>
-            <td>-</td>
-          </tr>
-        `;
-      }).join("");
-
-      // 배달 기록 테이블 (자신의 지점 라이더만)
-      document.getElementById("sub-admin-deliveries-tbody").innerHTML = myDeliveries.map(d => {
-        const rider = myRiders.find(r => r.id === d.riderId);
-        return `
-          <tr>
-            <td>${d.id}</td>
-            <td>${rider?.name || "불명"}</td>
-            <td>${d.fare}원</td>
-            <td>${d.fee100}원</td>
-            <td>${d.fee16}원</td>
-            <td>${d.final}원</td>
-          </tr>
-        `;
-      }).join("");
-
-      document.getElementById("sub-admin-deductions-tbody").innerHTML = myDeductions.map(d => {
-        const rider = myRiders.find(r => r.id === d.riderId);
-        return `
-          <tr>
-            <td>${d.id}</td>
-            <td>${rider?.name || "불명"}</td>
-            <td>${d.amount}원</td>
-            <td>${d.dailyAmount || "-"}</td>
-            <td>${d.totalDays || d.daysCount || "-"}</td>
-            <td>${d.weekday || "-"}</td>
-            <td>${d.monthlyAuto ? "예" : "아니오"}</td>
-            <td>${d.description || "-"}</td>
-            <td>${formatDateTime(d.createdAt)}</td>
-          </tr>
-        `;
-      }).join("");
-    }
-
-    function updateDeductAmountPreview() {
-      const dailyAmount = Number(document.getElementById("sub-admin-deduct-daily-amount").value);
-      const totalDays = Number(document.getElementById("sub-admin-deduct-total-days").value || 100);
-      const amountInput = document.getElementById("sub-admin-deduct-amount");
-
-      if (!Number.isFinite(dailyAmount) || dailyAmount <= 0 || !Number.isFinite(totalDays) || totalDays <= 0) {
-        amountInput.value = "";
-        return;
-      }
-
-      amountInput.value = String(Math.round(dailyAmount * totalDays));
-    }
-
-    document.getElementById("sub-admin-deduct-daily-amount").addEventListener("input", updateDeductAmountPreview);
-    document.getElementById("sub-admin-deduct-total-days").addEventListener("input", updateDeductAmountPreview);
-
-    document.getElementById("sub-admin-charge-rider-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const riderId = Number(document.getElementById("sub-admin-charge-rider").value);
-      const amount = Number(document.getElementById("sub-admin-charge-amount").value);
-
-      try {
-        const data = await requestJson(`/api/riders/${riderId}/charge`, {
-          method: "POST",
-          body: JSON.stringify({ amount })
-        });
-        setMessage("sub-admin-charge-msg", data.message, true);
-        refreshData();
-        document.getElementById("sub-admin-charge-rider-form").reset();
-      } catch (error) {
-        setMessage("sub-admin-charge-msg", error.message, false);
-      }
-    });
-
-    document.getElementById("sub-admin-deduct-rider-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const riderId = Number(document.getElementById("sub-admin-deduct-rider").value);
-      const dailyAmount = Number(document.getElementById("sub-admin-deduct-daily-amount").value);
-      const totalDays = Number(document.getElementById("sub-admin-deduct-total-days").value || 100);
-      const amount = Math.round(dailyAmount * totalDays);
-      const weekday = document.getElementById("sub-admin-deduct-weekday").value;
-      const monthlyAuto = document.getElementById("sub-admin-deduct-monthly-auto").checked;
-      const description = document.getElementById("sub-admin-deduct-description").value;
-
-      if (!Number.isFinite(dailyAmount) || dailyAmount <= 0) {
-        setMessage("sub-admin-deduct-msg", "하루 차감액을 올바르게 입력하세요.", false);
-        return;
-      }
-
-      if (!Number.isInteger(totalDays) || totalDays <= 0) {
-        setMessage("sub-admin-deduct-msg", "총 일수는 1일 이상 정수여야 합니다.", false);
-        return;
-      }
-
-      try {
-        const data = await requestJson(`/api/riders/${riderId}/deduct`, {
-          method: "POST",
-          body: JSON.stringify({ amount, dailyAmount, totalDays, daysCount: totalDays, weekday, monthlyAuto, description })
-        });
-        setMessage("sub-admin-deduct-msg", data.message, true);
-        refreshData();
-        document.getElementById("sub-admin-deduct-rider-form").reset();
-        document.getElementById("sub-admin-deduct-total-days").value = "100";
-        updateDeductAmountPreview();
-      } catch (error) {
-        setMessage("sub-admin-deduct-msg", error.message, false);
-      }
-    });
-
-    document.getElementById("sub-admin-password-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const currentPassword = document.getElementById("sub-admin-current-password").value;
-      const newPassword = document.getElementById("sub-admin-new-password").value;
-
-      try {
-        const data = await requestJson("/api/me/password", {
-          method: "POST",
-          body: JSON.stringify({ currentPassword, newPassword })
-        });
-        setMessage("sub-admin-password-msg", data.message, true);
-        document.getElementById("sub-admin-password-form").reset();
-      } catch (error) {
-        setMessage("sub-admin-password-msg", error.message, false);
-      }
-    });
-
     document.getElementById("admin-notice-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const notice = document.getElementById("admin-notice-input").value.trim();
@@ -1245,17 +890,13 @@
       document.getElementById("role-selection").hidden = false;
       document.getElementById("admin-dashboard").hidden = true;
       document.getElementById("rider-dashboard").hidden = true;
-      document.getElementById("sub-admin-dashboard").hidden = true;
       document.getElementById("admin-login-form").reset();
       document.getElementById("rider-login-form").reset();
-      document.getElementById("sub-admin-login-form").reset();
       document.getElementById("rider-withdraw-form").reset();
       document.getElementById("rider-password-form").reset();
       document.getElementById("create-admin-form").reset();
       document.getElementById("admin-password-form").reset();
       document.getElementById("admin-reset-form").reset();
-      document.getElementById("sub-admin-password-form").reset();
-      document.getElementById("sub-admin-deduct-rider-form").reset();
       document.getElementById("admin-reset-panel").hidden = true;
       document.getElementById("admins-tbody").innerHTML = "";
       selectedAdminForReset = null;
@@ -1263,7 +904,6 @@
     }
 
     refreshData();
-    updateDeductAmountPreview();
     renderNotice();
   </script>
 </body>

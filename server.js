@@ -161,10 +161,6 @@ function requireAdmin(req, res) {
   return requireRole(req, res, ['admin']);
 }
 
-function requireAdminOrSubAdmin(req, res) {
-  return requireRole(req, res, ['admin', 'sub_admin']);
-}
-
 function isSuperAdmin(session) {
   return session.role === 'admin' && !session.branch_id;
 }
@@ -189,11 +185,11 @@ function buildStateForSession(session, state) {
       return {
         branches: state.branches.filter((branch) => branch.id === session.branch_id),
         riders,
-        subAdmins: state.subAdmins.filter((subAdmin) => subAdmin.branch_id === session.branch_id),
         deliveries: state.deliveries.filter((delivery) => riderIds.has(delivery.riderId)),
         withdrawals: state.withdrawals.filter((withdrawal) => riderIds.has(withdrawal.riderId)),
         deductionLogs: state.deductionLogs.filter((deduction) => riderIds.has(deduction.riderId)),
         admins: state.admins.filter((admin) => admin.id === session.userId),
+        subAdmins: [],
         notice: state.notice,
       };
     }
@@ -201,20 +197,7 @@ function buildStateForSession(session, state) {
     return {
       ...state,
       admins: state.admins,
-    };
-  }
-
-  if (session.role === 'sub_admin') {
-    const riders = state.riders.filter((rider) => rider.branch_id === session.branch_id);
-    const riderIds = new Set(riders.map((rider) => rider.id));
-    return {
-      branches: state.branches,
-      riders,
-      subAdmins: state.subAdmins.filter((subAdmin) => subAdmin.branch_id === session.branch_id),
-      deliveries: state.deliveries.filter((delivery) => riderIds.has(delivery.riderId)),
-      withdrawals: state.withdrawals.filter((withdrawal) => riderIds.has(withdrawal.riderId)),
-      deductionLogs: state.deductionLogs.filter((deduction) => riderIds.has(deduction.riderId)),
-      notice: state.notice,
+      subAdmins: [],
     };
   }
 
@@ -331,12 +314,6 @@ async function migrateStoredPasswords() {
     }
   }
 
-  const subAdminPasswords = await all('SELECT id, password FROM sub_admins');
-  for (const subAdmin of subAdminPasswords) {
-    if (!isPasswordHash(subAdmin.password)) {
-      await run('UPDATE sub_admins SET password = ? WHERE id = ?', [hashPassword(subAdmin.password), subAdmin.id]);
-    }
-  }
 }
 
 async function initializeDatabase() {
@@ -382,17 +359,6 @@ async function initializeDatabase() {
   `);
 
   await run(`
-    CREATE TABLE IF NOT EXISTS sub_admins (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT NOT NULL UNIQUE,
-      password TEXT NOT NULL,
-      company_name TEXT NOT NULL,
-      branch_id INTEGER NOT NULL,
-      FOREIGN KEY (branch_id) REFERENCES branches(id)
-    )
-  `);
-
-  await run(`
     CREATE TABLE IF NOT EXISTS deliveries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       rider_id INTEGER NOT NULL,
@@ -400,6 +366,7 @@ async function initializeDatabase() {
       fee100 INTEGER NOT NULL,
       fee16 INTEGER NOT NULL,
       final INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       status TEXT NOT NULL,
       FOREIGN KEY (rider_id) REFERENCES riders(id)
     )
@@ -429,16 +396,18 @@ async function initializeDatabase() {
       total_days INTEGER,
       description TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      created_by_role TEXT NOT NULL DEFAULT 'sub_admin',
+      created_by_role TEXT NOT NULL DEFAULT 'admin',
       FOREIGN KEY (rider_id) REFERENCES riders(id)
     )
   `);
 
   await addColumnIfMissing('withdrawals', 'created_at', 'created_at TEXT');
   await addColumnIfMissing('withdrawals', 'processed_at', 'processed_at TEXT');
+  await addColumnIfMissing('deliveries', 'created_at', 'created_at TEXT');
   await addColumnIfMissing('deduction_logs', 'daily_amount', 'daily_amount INTEGER');
   await addColumnIfMissing('deduction_logs', 'total_days', 'total_days INTEGER');
   await addColumnIfMissing('admins', 'branch_id', 'branch_id INTEGER');
+  await run('UPDATE deliveries SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE withdrawals SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('global_notice', '')");
 
@@ -480,25 +449,20 @@ async function initializeDatabase() {
         );
       }
 
-      for (const subAdmin of seed.subAdmins) {
-        await run(
-          `INSERT INTO sub_admins (id, username, password, company_name, branch_id)
-           VALUES (?, ?, ?, ?, ?)`,
-          [
-            subAdmin.id,
-            subAdmin.username,
-            isPasswordHash(subAdmin.password) ? subAdmin.password : hashPassword(subAdmin.password),
-            subAdmin.company_name,
-            subAdmin.branch_id,
-          ]
-        );
-      }
-
       for (const delivery of seed.deliveries) {
         await run(
-          `INSERT INTO deliveries (id, rider_id, fare, fee100, fee16, final, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [delivery.id, delivery.riderId, delivery.fare, delivery.fee100, delivery.fee16, delivery.final, delivery.status]
+          `INSERT INTO deliveries (id, rider_id, fare, fee100, fee16, final, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            delivery.id,
+            delivery.riderId,
+            delivery.fare,
+            delivery.fee100,
+            delivery.fee16,
+            delivery.final,
+            delivery.status,
+            delivery.createdAt || new Date().toISOString(),
+          ]
         );
       }
 
@@ -533,7 +497,7 @@ async function initializeDatabase() {
             deduction.totalDays || null,
             deduction.description || '',
             deduction.createdAt || new Date().toISOString(),
-            deduction.createdByRole || 'sub_admin',
+            deduction.createdByRole || 'admin',
           ]
         );
       }
@@ -552,12 +516,16 @@ async function initializeDatabase() {
 }
 
 async function readState() {
-  const [admins, branches, riders, subAdmins, deliveries, withdrawals, deductionLogs, noticeRow] = await Promise.all([
+  const [admins, branches, riders, deliveries, withdrawals, deductionLogs, noticeRow] = await Promise.all([
     all('SELECT id, username, name, branch_id FROM admins ORDER BY id'),
     all('SELECT id, name FROM branches ORDER BY id'),
     all('SELECT id, username, name, balance, bank, account, branch_id FROM riders ORDER BY id'),
-    all('SELECT id, username, company_name, branch_id FROM sub_admins ORDER BY id'),
-    all('SELECT id, rider_id AS riderId, fare, fee100, fee16, final, status FROM deliveries ORDER BY id'),
+    all(
+      `SELECT id, rider_id AS riderId, fare, fee100, fee16, final,
+              created_at AS createdAt, status
+       FROM deliveries
+       ORDER BY id`
+    ),
     all(
       `SELECT id, rider_id AS riderId, amount, status,
               created_at AS createdAt, processed_at AS processedAt
@@ -579,7 +547,7 @@ async function readState() {
     admins,
     branches,
     riders,
-    subAdmins,
+    subAdmins: [],
     deliveries,
     withdrawals,
     deductionLogs,
@@ -638,28 +606,6 @@ app.post('/api/login', withErrorHandling(async (req, res) => {
       username: rider.username,
       name: rider.name,
       branch_id: rider.branch_id,
-      token: session.token,
-    });
-    return;
-  }
-
-  if (role === 'sub_admin') {
-    const subAdmin = await get(
-      'SELECT id, username, password, company_name, branch_id FROM sub_admins WHERE username = ?',
-      [username]
-    );
-    if (!subAdmin || !verifyPassword(password, subAdmin.password)) {
-      sendError(res, 401, '로그인 실패');
-      return;
-    }
-    const session = createSession('sub_admin', { id: subAdmin.id, username: subAdmin.username, branch_id: subAdmin.branch_id });
-    res.json({
-      success: true,
-      role: 'sub_admin',
-      sub_admin_id: subAdmin.id,
-      branch_id: subAdmin.branch_id,
-      username: subAdmin.username,
-      company_name: subAdmin.company_name,
       token: session.token,
     });
     return;
@@ -843,51 +789,6 @@ app.post('/api/branches', withErrorHandling(async (req, res) => {
   }
 }));
 
-app.post('/api/sub-admins', withErrorHandling(async (req, res) => {
-  const session = requireAdmin(req, res);
-  if (!session) {
-    return;
-  }
-  const username = String(req.body.username || '').trim();
-  const password = String(req.body.password || '').trim();
-  const companyName = String(req.body.company_name || '').trim();
-  const branchId = Number(req.body.branch_id);
-
-  if (!username || !password || !companyName || !branchId) {
-    sendError(res, 400, '지사장 정보를 모두 입력하세요.');
-    return;
-  }
-
-  if (session.branch_id && session.branch_id !== branchId) {
-    sendError(res, 403, '본인 지점의 지사장만 생성할 수 있습니다.');
-    return;
-  }
-
-  const branch = await get('SELECT id FROM branches WHERE id = ?', [branchId]);
-  if (!branch) {
-    sendError(res, 404, '지점을 찾을 수 없습니다.');
-    return;
-  }
-
-  try {
-    const result = await run(
-      'INSERT INTO sub_admins (username, password, company_name, branch_id) VALUES (?, ?, ?, ?)',
-      [username, hashPassword(password), companyName, branchId]
-    );
-    res.json({
-      success: true,
-      message: '지사장 추가 완료',
-      subAdmin: { id: result.lastID, username, company_name: companyName, branch_id: branchId },
-    });
-  } catch (error) {
-    if (String(error.message).includes('UNIQUE')) {
-      sendError(res, 409, '이미 존재하는 지사장 아이디입니다.');
-      return;
-    }
-    throw error;
-  }
-}));
-
 app.post('/api/riders', withErrorHandling(async (req, res) => {
   const session = requireAdmin(req, res);
   if (!session) {
@@ -935,7 +836,7 @@ app.post('/api/riders', withErrorHandling(async (req, res) => {
 }));
 
 app.post('/api/riders/:riderId/charge', withErrorHandling(async (req, res) => {
-  const session = requireAdminOrSubAdmin(req, res);
+  const session = requireAdmin(req, res);
   if (!session) {
     return;
   }
@@ -967,7 +868,7 @@ app.post('/api/riders/:riderId/charge', withErrorHandling(async (req, res) => {
 }));
 
 app.post('/api/riders/:riderId/deduct', withErrorHandling(async (req, res) => {
-  const session = requireAdminOrSubAdmin(req, res);
+  const session = requireAdmin(req, res);
   if (!session) {
     return;
   }
@@ -1104,8 +1005,8 @@ app.post('/api/deliveries', withErrorHandling(async (req, res) => {
   const settlement = calculateSettlement(fare);
   const delivery = await transaction(async () => {
     const result = await run(
-      `INSERT INTO deliveries (rider_id, fare, fee100, fee16, final, status)
-       VALUES (?, ?, ?, ?, ?, 'pending')`,
+      `INSERT INTO deliveries (rider_id, fare, fee100, fee16, final, status, created_at)
+       VALUES (?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)`,
       [riderId, fare, settlement.fee100, settlement.fee16, settlement.final]
     );
     await run('UPDATE riders SET balance = balance + ? WHERE id = ?', [settlement.final, riderId]);
@@ -1146,6 +1047,18 @@ app.post('/api/deliveries/:deliveryId/complete', withErrorHandling(async (req, r
     return;
   }
 
+  if (session.role === 'admin' && session.branch_id) {
+    const scopedRider = await get('SELECT id, branch_id FROM riders WHERE id = ?', [delivery.riderId]);
+    if (!scopedRider) {
+      sendError(res, 404, '기사를 찾을 수 없습니다.');
+      return;
+    }
+    if (scopedRider.branch_id !== session.branch_id) {
+      sendError(res, 403, '해당 지점 기사 배달만 처리할 수 있습니다.');
+      return;
+    }
+  }
+
   await run(`UPDATE deliveries SET status = 'completed' WHERE id = ?`, [deliveryId]);
   res.json({ success: true, message: '배달 완료', delivery: { ...delivery, status: 'completed' } });
 }));
@@ -1160,7 +1073,7 @@ app.post('/api/riders/:riderId/info', withErrorHandling(async (req, res) => {
   const bank = String(req.body.bank || '').trim();
   const account = String(req.body.account || '').trim();
 
-  const rider = await get('SELECT id FROM riders WHERE id = ?', [riderId]);
+  const rider = await get('SELECT id, branch_id FROM riders WHERE id = ?', [riderId]);
   if (!rider) {
     sendError(res, 404, '기사 정보를 찾을 수 없습니다.');
     return;
@@ -1168,6 +1081,11 @@ app.post('/api/riders/:riderId/info', withErrorHandling(async (req, res) => {
 
   if (session.role === 'rider' && riderId !== session.userId) {
     sendError(res, 403, '본인 정보만 수정할 수 있습니다.');
+    return;
+  }
+
+  if (session.role === 'admin' && session.branch_id && rider.branch_id !== session.branch_id) {
+    sendError(res, 403, '해당 지점 기사 정보만 수정할 수 있습니다.');
     return;
   }
 
@@ -1237,7 +1155,7 @@ app.post('/api/withdrawals', withErrorHandling(async (req, res) => {
 }));
 
 app.post('/api/withdrawals/:withdrawalId/approve', withErrorHandling(async (req, res) => {
-  const session = requireAdminOrSubAdmin(req, res);
+  const session = requireAdmin(req, res);
   if (!session) {
     return;
   }
@@ -1327,9 +1245,6 @@ app.post('/api/me/password', withErrorHandling(async (req, res) => {
   if (session.role === 'admin') {
     user = await get('SELECT id, password FROM admins WHERE id = ?', [session.userId]);
     tableName = 'admins';
-  } else if (session.role === 'sub_admin') {
-    user = await get('SELECT id, password FROM sub_admins WHERE id = ?', [session.userId]);
-    tableName = 'sub_admins';
   } else if (session.role === 'rider') {
     user = await get('SELECT id, password FROM riders WHERE id = ?', [session.userId]);
     tableName = 'riders';
