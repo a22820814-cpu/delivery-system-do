@@ -529,6 +529,7 @@
         <button type="button" class="menu-btn active" data-dashboard="admin" data-section="all">전체</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="integration-hub">연동</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="system-profit">시스템 수익</button>
+        <button type="button" class="menu-btn" data-dashboard="admin" data-section="platform-profit">플랫폼 수익</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="business-account">사업자 통장</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="baemin-biz">배민비즈</button>
         <button type="button" class="menu-btn" data-dashboard="admin" data-section="coupang-plus">쿠팡플러스</button>
@@ -556,6 +557,12 @@
       <div class="card" id="system-profit-card" data-section="system-profit" hidden>
         <h2>시스템 수익 현황 (시스템 관리자 전용)</h2>
         <div class="stats" id="system-profit-stats"></div>
+      </div>
+
+      <div class="card" id="platform-profit-card" data-section="platform-profit">
+        <h2>플랫폼 수익 현황 (배민/쿠팡 분리)</h2>
+        <div class="stats" id="platform-profit-stats"></div>
+        <div id="platform-profit-note" style="margin-top:8px; color:#456; font-size:12px;">연동 동기화 로그 기준 수익입니다.</div>
       </div>
 
       <div class="card" id="integration-hub-card" data-section="integration-hub">
@@ -907,6 +914,7 @@
       <div id="rider-menu" class="dashboard-menu">
         <button type="button" class="menu-btn active" data-dashboard="rider" data-section="all">전체</button>
         <button type="button" class="menu-btn" data-dashboard="rider" data-section="withdraw-request">출금요청</button>
+        <button type="button" class="menu-btn" data-dashboard="rider" data-section="branch-leaderboard-rider">지점 리더보드</button>
         <button type="button" class="menu-btn" data-dashboard="rider" data-section="auto-deduct-status">자동차감</button>
         <button type="button" class="menu-btn" data-dashboard="rider" data-section="arrears-history">미수내역</button>
         <button type="button" class="menu-btn" data-dashboard="rider" data-section="withdraw-history">출금내역</button>
@@ -929,6 +937,18 @@
             <div class="stat-value" id="rider-withdrawal-count">0</div>
             <div class="stat-label">출금 횟수</div>
           </div>
+        </div>
+      </div>
+
+      <div class="card" data-section="branch-leaderboard-rider">
+        <h2>지점별 플랫폼 랭킹 리더보드</h2>
+        <div class="card" style="margin-top: 12px;">
+          <h3 style="margin:0 0 8px;">배민 지점 리더보드</h3>
+          <div id="rider-baemin-branch-leaderboard-wrap">리더보드 데이터를 불러오는 중...</div>
+        </div>
+        <div class="card" style="margin-top: 12px;">
+          <h3 style="margin:0 0 8px;">쿠팡 지점 리더보드</h3>
+          <div id="rider-coupang-branch-leaderboard-wrap">리더보드 데이터를 불러오는 중...</div>
         </div>
       </div>
 
@@ -1146,6 +1166,13 @@
     let currentBaeminBiz = null;
     let currentCoupangPlus = null;
     let branchLeaderboards = { baemin: [], coupang: [] };
+    let platformProfits = {
+      baeminRevenue: 0,
+      coupangRevenue: 0,
+      totalRevenue: 0,
+      baeminSyncCount: 0,
+      coupangSyncCount: 0,
+    };
     let currentNotice = "";
     let selectedAdminForReset = null;
     const HISTORY_PAGE_SIZE = 7;
@@ -1586,6 +1613,35 @@
     function renderBranchLeaderboard() {
       renderSinglePlatformLeaderboard("baemin-branch-leaderboard-wrap", branchLeaderboards.baemin, "배민");
       renderSinglePlatformLeaderboard("coupang-branch-leaderboard-wrap", branchLeaderboards.coupang, "쿠팡");
+      renderSinglePlatformLeaderboard("rider-baemin-branch-leaderboard-wrap", branchLeaderboards.baemin, "배민");
+      renderSinglePlatformLeaderboard("rider-coupang-branch-leaderboard-wrap", branchLeaderboards.coupang, "쿠팡");
+    }
+
+    function renderPlatformProfits() {
+      const statsEl = document.getElementById("platform-profit-stats");
+      if (!statsEl) {
+        return;
+      }
+      const baeminRevenue = Number(platformProfits?.baeminRevenue) || 0;
+      const coupangRevenue = Number(platformProfits?.coupangRevenue) || 0;
+      const totalRevenue = Number(platformProfits?.totalRevenue) || (baeminRevenue + coupangRevenue);
+      const baeminSyncCount = Number(platformProfits?.baeminSyncCount) || 0;
+      const coupangSyncCount = Number(platformProfits?.coupangSyncCount) || 0;
+
+      statsEl.innerHTML = `
+        <div class="stat-box">
+          <div class="stat-value">${formatKrw(baeminRevenue)}</div>
+          <div class="stat-label">배민 수익 (동기화 ${formatNumber(baeminSyncCount)}회)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value">${formatKrw(coupangRevenue)}</div>
+          <div class="stat-label">쿠팡 수익 (동기화 ${formatNumber(coupangSyncCount)}회)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value">${formatKrw(totalRevenue)}</div>
+          <div class="stat-label">플랫폼 합계 수익</div>
+        </div>
+      `;
     }
 
     function applyDashboardSection(dashboardType, section) {
@@ -1835,7 +1891,7 @@
     }
 
     async function loadBranchLeaderboards() {
-      if (currentUser?.role !== "admin") {
+      if (currentUser?.role !== "admin" && currentUser?.role !== "rider") {
         return;
       }
       const data = await requestJson('/api/branch-leaderboards');
@@ -1844,6 +1900,21 @@
         coupang: data?.data?.coupang || [],
       };
       renderBranchLeaderboard();
+    }
+
+    async function loadPlatformProfits() {
+      if (currentUser?.role !== "admin" && currentUser?.role !== "rider") {
+        return;
+      }
+      const data = await requestJson('/api/platform-profits');
+      platformProfits = {
+        baeminRevenue: Number(data?.data?.baeminRevenue) || 0,
+        coupangRevenue: Number(data?.data?.coupangRevenue) || 0,
+        totalRevenue: Number(data?.data?.totalRevenue) || 0,
+        baeminSyncCount: Number(data?.data?.baeminSyncCount) || 0,
+        coupangSyncCount: Number(data?.data?.coupangSyncCount) || 0,
+      };
+      renderPlatformProfits();
     }
 
     async function requestJson(url, options = {}) {
@@ -1976,8 +2047,25 @@
           await loadBaeminBizStatus();
           await loadCoupangPlusStatus();
           await loadBranchLeaderboards();
+          await loadPlatformProfits();
           updateAdminDashboard();
         } else if (currentUser?.role === "rider") {
+          try {
+            await loadBranchLeaderboards();
+          } catch (leaderboardError) {
+            branchLeaderboards = { baemin: [], coupang: [] };
+          }
+          try {
+            await loadPlatformProfits();
+          } catch (platformProfitError) {
+            platformProfits = {
+              baeminRevenue: 0,
+              coupangRevenue: 0,
+              totalRevenue: 0,
+              baeminSyncCount: 0,
+              coupangSyncCount: 0,
+            };
+          }
           try {
             const arrearsData = await requestJson('/api/riders/me/arrears');
             riderArrears = {
@@ -2143,6 +2231,7 @@
       });
 
       const profitCard = document.getElementById("system-profit-card");
+      const platformProfitCard = document.getElementById("platform-profit-card");
       const businessCard = document.getElementById("business-account-card");
       const baeminCard = document.getElementById("baemin-biz-card");
       const coupangCard = document.getElementById("coupang-plus-card");
@@ -2150,6 +2239,9 @@
       const showSystemProfit = isSystemAdminUser();
       if (profitCard) {
         profitCard.hidden = !showSystemProfit;
+      }
+      if (platformProfitCard) {
+        platformProfitCard.hidden = false;
       }
       if (businessCard) {
         businessCard.hidden = !showSystemProfit;
@@ -2193,6 +2285,9 @@
       document.querySelectorAll('#admin-menu .menu-btn[data-section="system-profit"]').forEach((button) => {
         button.hidden = !isSystemAdminUser();
       });
+      document.querySelectorAll('#admin-menu .menu-btn[data-section="platform-profit"]').forEach((button) => {
+        button.hidden = false;
+      });
       document.querySelectorAll('#admin-menu .menu-btn[data-section="business-account"]').forEach((button) => {
         button.hidden = !isSystemAdminUser();
       });
@@ -2208,6 +2303,7 @@
       renderBusinessAccount();
       renderBaeminBiz();
       renderCoupangPlus();
+      renderPlatformProfits();
       renderIntegrationSummary();
     }
 

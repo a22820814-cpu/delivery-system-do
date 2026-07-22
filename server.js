@@ -570,6 +570,7 @@ async function initializeDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       branch_id INTEGER NOT NULL,
       imported_orders INTEGER NOT NULL DEFAULT 0,
+      imported_revenue INTEGER NOT NULL DEFAULT 0,
       synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (branch_id) REFERENCES branches(id)
     )
@@ -580,6 +581,7 @@ async function initializeDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       branch_id INTEGER NOT NULL,
       imported_orders INTEGER NOT NULL DEFAULT 0,
+      imported_revenue INTEGER NOT NULL DEFAULT 0,
       synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (branch_id) REFERENCES branches(id)
     )
@@ -606,6 +608,8 @@ async function initializeDatabase() {
   await addColumnIfMissing('auto_deduct_rules', 'start_date', 'start_date TEXT');
   await addColumnIfMissing('baemin_biz_integrations', 'base_url', "base_url TEXT NOT NULL DEFAULT ''");
   await addColumnIfMissing('coupang_plus_integrations', 'base_url', "base_url TEXT NOT NULL DEFAULT ''");
+  await addColumnIfMissing('baemin_biz_sync_logs', 'imported_revenue', 'imported_revenue INTEGER NOT NULL DEFAULT 0');
+  await addColumnIfMissing('coupang_plus_sync_logs', 'imported_revenue', 'imported_revenue INTEGER NOT NULL DEFAULT 0');
   await run('UPDATE deliveries SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE withdrawals SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)');
   await run('UPDATE withdrawals SET fee = COALESCE(fee, 0)');
@@ -2197,6 +2201,7 @@ async function callPartnerConnectApi({ providerLabel, baseUrl, syncPath, apiKey,
     }
 
     let importedOrders = 0;
+    let importedRevenue = 0;
     if (Array.isArray(payload)) {
       importedOrders = payload.length;
     } else if (payload && Array.isArray(payload.orders)) {
@@ -2205,7 +2210,43 @@ async function callPartnerConnectApi({ providerLabel, baseUrl, syncPath, apiKey,
       importedOrders = payload.data.length;
     }
 
-    return { importedOrders, payload };
+    const pickRevenue = (value) => {
+      const num = Number(value);
+      if (Number.isFinite(num) && num >= 0) {
+        return Math.round(num);
+      }
+      return null;
+    };
+
+    const directRevenue = pickRevenue(payload?.totalRevenue)
+      ?? pickRevenue(payload?.revenue)
+      ?? pickRevenue(payload?.amount)
+      ?? pickRevenue(payload?.total_amount)
+      ?? pickRevenue(payload?.summary?.totalRevenue)
+      ?? pickRevenue(payload?.data?.totalRevenue);
+
+    if (directRevenue != null) {
+      importedRevenue = directRevenue;
+    } else {
+      const orders = Array.isArray(payload)
+        ? payload
+        : (Array.isArray(payload?.orders)
+          ? payload.orders
+          : (Array.isArray(payload?.data)
+            ? payload.data
+            : []));
+
+      importedRevenue = orders.reduce((sum, item) => {
+        const orderAmount = pickRevenue(item?.amount)
+          ?? pickRevenue(item?.price)
+          ?? pickRevenue(item?.totalAmount)
+          ?? pickRevenue(item?.total_price)
+          ?? 0;
+        return sum + orderAmount;
+      }, 0);
+    }
+
+    return { importedOrders, importedRevenue, payload };
   } finally {
     clearTimeout(timeoutId);
   }
@@ -2256,6 +2297,9 @@ async function findCoupangIntegrationByBranchId(branchId) {
 }
 
 function filterLeaderboardBySessionBranch(session, rows) {
+  if (session?.role !== 'admin') {
+    return rows;
+  }
   if (isSuperAdmin(session)) {
     return rows;
   }
@@ -2274,6 +2318,25 @@ async function getBranchLeaderboardRows(tableName) {
      GROUP BY b.id, b.name
      ORDER BY totalOrders DESC, syncCount DESC, b.name ASC`
   );
+}
+
+async function getPlatformProfitSummary() {
+  const [baeminProfitRow, coupangProfitRow, baeminSyncRow, coupangSyncRow] = await Promise.all([
+    get('SELECT COALESCE(SUM(imported_revenue), 0) AS totalRevenue FROM baemin_biz_sync_logs'),
+    get('SELECT COALESCE(SUM(imported_revenue), 0) AS totalRevenue FROM coupang_plus_sync_logs'),
+    get('SELECT COUNT(*) AS syncCount FROM baemin_biz_sync_logs'),
+    get('SELECT COUNT(*) AS syncCount FROM coupang_plus_sync_logs'),
+  ]);
+
+  const baeminRevenue = Number(baeminProfitRow?.totalRevenue || 0);
+  const coupangRevenue = Number(coupangProfitRow?.totalRevenue || 0);
+  return {
+    baeminRevenue,
+    coupangRevenue,
+    totalRevenue: baeminRevenue + coupangRevenue,
+    baeminSyncCount: Number(baeminSyncRow?.syncCount || 0),
+    coupangSyncCount: Number(coupangSyncRow?.syncCount || 0),
+  };
 }
 
 app.get('/api/baemin-biz', withErrorHandling(async (req, res) => {
@@ -2459,9 +2522,9 @@ app.post('/api/baemin-biz/sync', withErrorHandling(async (req, res) => {
   );
 
   await run(
-    `INSERT INTO baemin_biz_sync_logs (branch_id, imported_orders, synced_at)
-     VALUES (?, ?, ?)`,
-    [branchId, Number(syncResult.importedOrders) || 0, nowIso]
+    `INSERT INTO baemin_biz_sync_logs (branch_id, imported_orders, imported_revenue, synced_at)
+     VALUES (?, ?, ?, ?)`,
+    [branchId, Number(syncResult.importedOrders) || 0, Number(syncResult.importedRevenue) || 0, nowIso]
   );
 
   res.json({
@@ -2471,6 +2534,7 @@ app.post('/api/baemin-biz/sync', withErrorHandling(async (req, res) => {
       branchId,
       syncedAt: nowIso,
       importedOrders: syncResult.importedOrders || 0,
+      importedRevenue: Number(syncResult.importedRevenue) || 0,
       importedRiders: 0,
       endpoint: syncPath,
     },
@@ -2660,9 +2724,9 @@ app.post('/api/coupang-plus/sync', withErrorHandling(async (req, res) => {
   );
 
   await run(
-    `INSERT INTO coupang_plus_sync_logs (branch_id, imported_orders, synced_at)
-     VALUES (?, ?, ?)`,
-    [branchId, Number(syncResult.importedOrders) || 0, nowIso]
+    `INSERT INTO coupang_plus_sync_logs (branch_id, imported_orders, imported_revenue, synced_at)
+     VALUES (?, ?, ?, ?)`,
+    [branchId, Number(syncResult.importedOrders) || 0, Number(syncResult.importedRevenue) || 0, nowIso]
   );
 
   res.json({
@@ -2672,14 +2736,28 @@ app.post('/api/coupang-plus/sync', withErrorHandling(async (req, res) => {
       branchId,
       syncedAt: nowIso,
       importedOrders: syncResult.importedOrders || 0,
+      importedRevenue: Number(syncResult.importedRevenue) || 0,
       importedRiders: 0,
       endpoint: syncPath,
     },
   });
 }));
 
+app.get('/api/platform-profits', withErrorHandling(async (req, res) => {
+  const session = requireRole(req, res, ['admin', 'rider']);
+  if (!session) {
+    return;
+  }
+
+  const summary = await getPlatformProfitSummary();
+  res.json({
+    success: true,
+    data: summary,
+  });
+}));
+
 app.get('/api/branch-leaderboards', withErrorHandling(async (req, res) => {
-  const session = requireAdmin(req, res);
+  const session = requireRole(req, res, ['admin', 'rider']);
   if (!session) {
     return;
   }
